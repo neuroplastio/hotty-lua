@@ -156,6 +156,12 @@ pseudo-terminal, plays its terminal with a fake host
 tests need it), drives it over RPC, and reads what the host was sent.
 `HOTTY_TEST=<part of a name>` runs some of them.
 
+`make e2e`, outside the gate, runs the click example in hottyterm, a native
+host, on the private headless display of hotty-blitz's
+`scripts/headless.sh`: it clicks the button through a virtual pointer,
+presses Ctrl-L, scrolls and splits, and leaves a screenshot of each in
+`$OUT`.
+
 The vectors are a copy of the spec's (`tests/vectors.json`). With a checkout
 of neuroplastio/hotty at `HOTTY_DIR` (`../../hotty/main` by default), the
 runner fails when the copy differs; `make vectors` updates it.

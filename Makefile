@@ -17,7 +17,7 @@ export HOTTY_DIR
 # One target at a time: the Neovim tests run on timers.
 .NOTPARALLEL:
 
-.PHONY: check fmt fmt-fix core nvim vectors clean
+.PHONY: check fmt fmt-fix core nvim e2e vectors clean
 
 check: fmt core nvim   ## the gate
 
@@ -36,6 +36,9 @@ core: $(GLUA)   ## the conformance vectors and the unit tests, under every runti
 
 nvim:   ## hotty.nvim, in a Neovim whose terminal is a fake host (tests/nvim)
 	$(NVIM) -l tests/nvim/run.lua
+
+e2e:   ## the click example in hottyterm, on hotty-blitz's headless display; not in the gate
+	sh tests/e2e/hottyterm.sh
 
 $(GLUA):
 	GOBIN=$(CURDIR)/.bin $(GO) install github.com/yuin/gopher-lua/cmd/glua@$(GOPHER_LUA)

@@ -125,7 +125,8 @@ function Term:attach()
 	api.nvim_create_autocmd("VimLeavePre", {
 		group = group,
 		callback = function()
-			for _, s in ipairs(self.sessions) do
+			-- A copy: each session takes itself out of the list as it closes.
+			for _, s in ipairs(vim.list_slice(self.sessions)) do
 				s:close()
 			end
 		end,
@@ -384,8 +385,11 @@ end
 -- go out at once, while the TUI writes a frame when it flushes, so a
 -- placement sent from the event itself would land before the cells it goes
 -- with.
+local sessions_made = 0
+
 function Session:watch()
-	self.group = api.nvim_create_augroup("hotty-session-" .. self.prefix, { clear = true })
+	sessions_made = sessions_made + 1
+	self.group = api.nvim_create_augroup("hotty-session-" .. sessions_made, { clear = true })
 	api.nvim_create_autocmd({
 		"WinScrolled",
 		"WinResized",

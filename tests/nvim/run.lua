@@ -510,6 +510,23 @@ test("examples/nvim/click.lua, not a host: the button in cells", function(spawn)
 	return t
 end)
 
+test("leaving Neovim deletes every session's surfaces", function(spawn)
+	local t = spawn()
+	card(t)
+	t.lua([[
+		T.other = require("hotty.nvim").session({ prefix = "u" })
+		T.other:surface("x", { html = "<p>x</p>", anchor = { screen = { 40, 1 } }, cols = 5, rows = 1 })
+	]])
+	wait(function()
+		return t.host.placements["u-x"] ~= nil
+	end, "the second session's surface")
+	pcall(vim.rpcrequest, t.rpc, "nvim_command", "qa!")
+	wait(function()
+		return #t.host:commands("del", "t-card") == 1 and #t.host:commands("del", "u-x") == 1
+	end, "both deleted")
+	return t
+end)
+
 say(string.format("nvim    %d passed%s", passed, #failures > 0 and (", " .. #failures .. " failed") or ""))
 if #failures > 0 then
 	os.exit(1)
