@@ -276,7 +276,9 @@ local function run_encode(v)
 	local pairs_, keys = {}, {}
 	for i, p in ipairs(v.control) do
 		pairs_[i] = { p[1], p[2] }
-		keys[i] = p[1]
+		if p[1] ~= "m" and p[1] ~= "o" then -- Encode's to set
+			keys[#keys + 1] = p[1]
+		end
 	end
 	local out = hotty.encode(pairs_, payload)
 	if v.bytes and out ~= v.bytes then

@@ -211,7 +211,8 @@ end
 
 --- One command as one or more OSC sequences. control is a control
 --- (hotty.control) or a list of {key, value}, in the order they go out;
---- values are cleaned. payload is a string of bytes, or nil.
+--- values are cleaned, and the keys o and m, which are encode's to set, are
+--- left out. payload is a string of bytes, or nil.
 ---
 --- opts.compress, a function from bytes to zlib bytes, compresses a payload
 --- of COMPRESS_FROM bytes or more when that makes it smaller, and marks it
@@ -227,11 +228,13 @@ function M.encode(control, payload, opts)
 		end
 	end
 	local parts, quiet = {}, nil
-	for i, p in ipairs(control_pairs(control)) do
-		local v = M.clean_value(p[2])
-		parts[i] = p[1] .. "=" .. v
-		if p[1] == "q" then
-			quiet = v
+	for _, p in ipairs(control_pairs(control)) do
+		if p[1] ~= "o" and p[1] ~= "m" then -- Encode's to set
+			local v = M.clean_value(p[2])
+			parts[#parts + 1] = p[1] .. "=" .. v
+			if p[1] == "q" then
+				quiet = v
+			end
 		end
 	end
 	if zipped then
@@ -957,6 +960,14 @@ function Scanner:holding()
 		return join(self.parts) .. (self.esc and ESC or "")
 	end
 	return self.held
+end
+
+--- Whether a HOTTY sequence is in progress, or one too long is being
+--- dropped: the next feed goes on with it, and flush would drop it.
+--- Otherwise what holding returns is the start of a segment, which a
+--- program reading keys may flush after a moment, as typing.
+function Scanner:in_sequence()
+	return self.mode ~= GROUND
 end
 
 local function push(out, kind, data)

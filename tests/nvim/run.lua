@@ -516,7 +516,10 @@ test("examples/nvim/click.lua: a button that counts its clicks", function(spawn)
 		return #d == 2 and d[2].payload == "2 clicks"
 	end, "two deltas")
 	eq(t.host:commands("delta", "click-example-card")[1].payload, "1 click")
-	eq(#t.host:commands("blur", "click-example-card"), 2, "the keyboard back to the editor")
+	-- The second blur may come in a later read than the second delta.
+	wait(function()
+		return #t.host:commands("blur", "click-example-card") == 2
+	end, "the keyboard back to the editor, twice")
 	return t
 end)
 
