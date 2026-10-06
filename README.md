@@ -42,17 +42,17 @@ an error.
 
 | SDK.md | hotty |
 | --- | --- |
-| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY` |
+| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
 | commands (§3.4) | `query`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `sync` |
-| reply options (§3.4.2) | the last argument: `{ n = 4, q = 2, detached = true }` |
+| reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL` |
 | Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover`, `keep_cursor` |
 | names (§3.5) | `valid_name(s)`, `surface_name(s)` |
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1 })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
-| messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
+| messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
 
 Where Lua differs:
 
@@ -62,7 +62,11 @@ Where Lua differs:
 - **A message's control** is a table of keys to values, and `msg.keys` lists
   the keys in the order they came.
 - **`link()` and `size()`** return two values (`href, url`; `w, h`), and
-  `cell_css()` returns `w, h`. `drag()` and `hover()` return tables.
+  `cell_css()` returns `w, h`. `drag()`, `hover()` and `area()` return
+  tables.
+- **The scroll axes** are also `scroll_vertical` and `scroll_horizontal`,
+  as SDK.md's Appendix A spells them for Lua; every other constant here is
+  in upper case.
 - **zlib.** Lua has none. `encode` compresses only when given a compressor
   (`opts.compress`, from bytes to zlib bytes), and a host never compresses
   what it sends (SPEC §3.3). The Decoder inflates `o=z` itself, with a

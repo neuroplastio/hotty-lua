@@ -225,6 +225,34 @@ test("a surface over a buffer position", function(spawn)
 	return t
 end)
 
+test("scroll goes with the document; a new scroll sends it again, another key does not", function(spawn)
+	local t = spawn()
+	t.lua(SETUP)
+	wait(function()
+		return t.lua("return T.mode") == "native"
+	end, "native")
+	t.lua([[T.list = T.session:surface("list", {
+		html = "<ul></ul>", anchor = { buf = 0, row = 2, col = 0 }, cols = 10, rows = 3, scroll = 1,
+	})]])
+	wait(function()
+		return t.host.placements["t-list"] ~= nil
+	end, "the placement")
+	eq(t.host:commands("doc", "t-list")[1].control.scroll, "1")
+	t.lua("T.list:set({ z = 1 })")
+	wait(function()
+		local p = t.host.placements["t-list"]
+		return p and p.z == 1
+	end, "placed again")
+	eq(#t.host:commands("doc", "t-list"), 1, "a placement key does not send the document")
+	t.lua("T.list:set({ scroll = 0 })")
+	wait(function()
+		return #t.host:commands("doc", "t-list") == 2
+	end, "the document again")
+	eq(t.host:commands("doc", "t-list")[2].control.scroll, nil)
+	eq(t.host.problems, {})
+	return t
+end)
+
 test("a click reaches the surface's handler, whose delta reaches the host", function(spawn)
 	local t = spawn()
 	card(t)

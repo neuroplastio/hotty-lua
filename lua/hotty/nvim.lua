@@ -458,6 +458,9 @@ end
 ---   z, press, fit, hover   as in a placement (SPEC §5.2)
 ---   keep        hide it rather than delete it when it is out of view
 ---   detached    send the document detached: the surface reports nothing
+---   scroll      the axes along which the document scrolls in its cells, a
+---               bitmask of hotty.SCROLL_VERTICAL and SCROLL_HORIZONTAL
+---               (SPEC §5.1); a host that cannot ignores it and clips
 ---   on_event    function(event, surface)
 function Session:surface(name, spec)
 	local id = self:id(name)
@@ -789,7 +792,7 @@ function Session:layout()
 					if type(html) == "function" then
 						html = html(sf)
 					end
-					add(hotty.doc(id, html or "", { detached = sf.spec.detached }))
+					add(hotty.doc(id, html or "", { detached = sf.spec.detached, scroll = sf.spec.scroll }))
 					sf.sent, sf.placed = true, nil
 				end
 				if sf.sent and (force or sf.placed ~= want.key) then
@@ -906,7 +909,8 @@ end
 -- Surfaces --------------------------------------------------------------------
 
 --- Changes a surface's spec: the keys given replace the ones it had. A new
---- html sends the document again; a new anchor or size places it again.
+--- html or scroll sends the document again; a new anchor or size places it
+--- again.
 function Surface:set(spec)
 	local old = self.spec
 	local new = {}
@@ -924,7 +928,7 @@ function Surface:set(spec)
 	if spec and (spec.rows ~= nil or spec.html ~= nil) then
 		self.rows = nil -- measured again, if auto
 	end
-	if spec and spec.html ~= nil and old.html ~= nil and self.sent then
+	if spec and self.sent and ((spec.html ~= nil and old.html ~= nil) or (new.scroll or 0) ~= (old.scroll or 0)) then
 		self.sent = false
 	end
 	self.placed = nil

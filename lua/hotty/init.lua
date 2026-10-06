@@ -92,6 +92,13 @@ M.REPLY_ALWAYS = 0
 M.REPLY_ON_ERROR = 1
 M.NO_REPLY = 2
 
+-- A document's scroll axes, a bitmask (SPEC §5.1). Appendix A of SDK.md
+-- spells them in lower case; both name the same values.
+M.SCROLL_VERTICAL = 1
+M.SCROLL_HORIZONTAL = 2
+M.scroll_vertical = M.SCROLL_VERTICAL
+M.scroll_horizontal = M.SCROLL_HORIZONTAL
+
 local ESC = "\27"
 local ST = "\27\\"
 local HEAD = ESC .. "]" .. M.NUMBER -- ESC ] 7279
@@ -276,12 +283,17 @@ function M.query(n)
 	return M.encode({ { "a", "q" }, { "n", int(n or 1) } }) .. ESC .. "[c"
 end
 
---- Sends a surface's document (SPEC §5.1). opts: n, q (default 1), and
---- detached, which creates it detached (d=1).
+--- Sends a surface's document (SPEC §5.1). opts: n, q (default 1);
+--- detached, which creates it detached (d=1); and scroll, the axes along
+--- which it scrolls, a bitmask of SCROLL_VERTICAL and SCROLL_HORIZONTAL (0 or
+--- nil: it does not, and no key goes out).
 function M.doc(surface, html, opts)
 	local p = { { "a", "doc" }, { "s", surface } }
 	if opts and opts.detached then
 		p[#p + 1] = { "d", "1" }
+	end
+	if opts and opts.scroll and opts.scroll ~= 0 then
+		p[#p + 1] = { "scroll", int(opts.scroll) }
 	end
 	return command(p, html, M.REPLY_ON_ERROR, opts)
 end
@@ -676,6 +688,23 @@ function Event:hover()
 	return { c = c, r = r, out = false }
 end
 
+--- A click's or a press's element, in cells from the surface's top left
+--- cell: {c, r, w, h} (SPEC §9).
+function Event:area()
+	if self.kind ~= M.EVENT_CLICK and self.kind ~= M.EVENT_PRESS then
+		return nil
+	end
+	local a = self.detail.area
+	if not json.is_object(a) then
+		return nil
+	end
+	local c, r, w, h = a.c, a.r, a.w, a.h
+	if not (is_int(c) and is_int(r) and is_int(w) and is_int(h)) then
+		return nil
+	end
+	return { c = c, r = r, w = w, h = h }
+end
+
 local function strings(v)
 	local out = {}
 	if json.is_array(v) then
@@ -718,6 +747,7 @@ function M.caps(d)
 		end
 	end
 	c.passthrough = d.passthrough == true
+	c.scroll = d.scroll == true
 	c.host = str(d.host)
 	c.version = str(d.version)
 	return c

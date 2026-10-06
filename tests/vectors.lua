@@ -27,6 +27,9 @@ local FEATURES = {
 	["caps.lenient"] = true,
 	["caps.drag-kinds"] = true,
 	["options.unordered"] = true,
+	["doc.scroll"] = true,
+	["event.area"] = true,
+	["caps.scroll"] = true,
 	["decode.abort-count"] = true,
 	["decode.unterminated"] = true,
 	["scanner.da1"] = true,
@@ -189,7 +192,7 @@ end
 local function build(b)
 	local a = b.args or {}
 	local o = b.options or {}
-	local opts = { n = o.n, q = o.q, detached = o.detached }
+	local opts = { n = o.n, q = o.q, detached = o.detached, scroll = o.scroll }
 	local name = b.build
 	if name == "query" then
 		return hotty.query(a.n)
@@ -343,6 +346,7 @@ local function event_view(e)
 		fit_rows = e:fit_rows(),
 		drag = e:drag(),
 		hover = e:hover(),
+		area = e:area(),
 	}
 end
 
@@ -358,6 +362,7 @@ local function caps_view(c, want)
 		limits = c.limits,
 		net = c.net,
 		passthrough = c.passthrough,
+		scroll = c.scroll,
 		host = c.host,
 		version = c.version,
 		drags = c:drags(),
