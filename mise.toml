@@ -1,0 +1,3 @@
+[tools]
+go = "1.26.8"     # builds glua, gopher-lua's interpreter, for the gate
+stylua = "2.5.2"
