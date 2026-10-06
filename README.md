@@ -50,7 +50,7 @@ an error.
 | Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover`, `keep_cursor` |
 | names (§3.5) | `valid_name(s)`, `surface_name(s)` |
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
-| Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `.invalid` |
+| Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1 })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
 | messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
 
@@ -159,6 +159,9 @@ pseudo-terminal, plays its terminal with a fake host
 (`tests/nvim/fakehost.lua`, the test host of SDK.md §4.4 as far as these
 tests need it), drives it over RPC, and reads what the host was sent.
 `HOTTY_TEST=<part of a name>` runs some of them.
+
+CI (`.github/workflows/ci.yml`) runs `make check` on GitHub's hosted
+Ubuntu, with Neovim 0.12.5, and checks that the vectors are the spec's.
 
 `make e2e`, outside the gate, runs the click example in hottyterm, a native
 host, on the private headless display of hotty-blitz's

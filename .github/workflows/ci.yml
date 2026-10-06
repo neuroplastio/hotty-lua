@@ -1,0 +1,67 @@
+# CI: make check under every runtime the gate runs (luajit, lua5.1,
+# nvim -l, glua), and the conformance vectors being the spec's.
+#
+# GitHub's hosted runners: the repository is public. Never a self-hosted
+# runner here, since a pull request from anyone would run its code on it.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # hotty.nvim needs nvim_ui_send, new in 0.12; the distribution's is older.
+  NVIM_VERSION: v0.12.5
+
+jobs:
+  check:
+    name: make check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # Go, which builds glua (gopher-lua, as plx embeds it), and stylua.
+      - uses: jdx/mise-action@v4
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('mise.toml', 'Makefile') }}
+          restore-keys: go-${{ runner.os }}-
+      - name: luajit and lua5.1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends luajit lua5.1
+      - name: Neovim ${{ env.NVIM_VERSION }}
+        run: |
+          curl -fsSL "https://github.com/neovim/neovim/releases/download/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" |
+            tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - run: make check
+
+  vectors:
+    name: the conformance vectors are the spec's
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: neuroplastio/hotty
+          path: .hotty
+      - name: tests/vectors.json is neuroplastio/hotty's
+        run: |
+          if ! cmp -s .hotty/conformance/vectors.json tests/vectors.json; then
+            echo "tests/vectors.json differs from neuroplastio/hotty's: run make vectors" >&2
+            exit 1
+          fi
+      - name: luajit
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends luajit
+      - name: the wire layer passes them
+        env:
+          HOTTY_DIR: ${{ github.workspace }}/.hotty
+        run: luajit tests/vectors.lua
