@@ -122,7 +122,13 @@ session:surface("card", {
   above the cells (SPEC §5.2), so a surface they would cover is hidden while
   they do (`occlude = false` turns that off).
 - **What the host loses** (`ENOENT` in answer to a placement) is sent again.
+  A resize places every surface again: the TUI starts its redraw with an
+  erase in display, which takes placements with it (SDK.md §4.3).
   `session:relayout(true)` places every surface again, changed or not.
+- **Not yet: Ctrl-L.** Ctrl-L (and `:mode`) erases the screen too, and
+  Neovim raises no event for it, so a surface stays gone until something
+  moves it, or until the program calls `relayout(true)`. Which event
+  should tell the adapter is an open question.
 - **Rows auto** (`rows = nil`): the first placement is numbered, and the
   rows the host chose are kept; `fit = true` keeps them current.
 - **Closing.** `session:close()` deletes the surfaces, `session:detach_all()`

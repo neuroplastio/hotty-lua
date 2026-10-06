@@ -4,7 +4,8 @@
 --
 --   - the terminal: DA1, the cursor report (DSR 5n), synchronized output's
 --     DECRQM, the background colour; it follows the cursor through CUP and
---     ESC 7 / ESC 8, so it knows where each placement lands;
+--     ESC 7 / ESC 8, so it knows where each placement lands, and an erase in
+--     display (ED 2 or 3) drops every placement, as hottyterm does;
 --   - the host (when native): the query, and every command, kept as surfaces
 --     and placements, with replies as SPEC §3.6 has them. It lays nothing
 --     out: r=auto gets auto_rows.
@@ -151,6 +152,9 @@ function Host:terminal(data)
 				out[#out + 1] = "\27[0n"
 			elseif final == "p" and csi == "?2026$" then
 				out[#out + 1] = "\27[?2026;2$y"
+			elseif final == "J" and (csi == "2" or csi == "3") then
+				self.placements = {} -- an erase in display takes them (SDK.md §4.3)
+				self.erased = (self.erased or 0) + 1
 			elseif final == "H" or final == "f" then
 				local y, x = csi:match("^(%d*);?(%d*)$")
 				self.cursor = { x = (tonumber(x) or 1) - 1, y = (tonumber(y) or 1) - 1 }

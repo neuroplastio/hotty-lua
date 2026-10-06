@@ -389,7 +389,6 @@ function Session:watch()
 	api.nvim_create_autocmd({
 		"WinScrolled",
 		"WinResized",
-		"VimResized",
 		"WinClosed",
 		"WinNew",
 		"WinEnter", -- a buffer's anchor shows in the current window
@@ -404,6 +403,15 @@ function Session:watch()
 		group = self.group,
 		callback = function()
 			self:schedule()
+		end,
+	})
+	-- A resize redraws the whole screen, and the TUI erases it first (ED 2),
+	-- which takes the placements with it (SDK.md §4.3): every surface is
+	-- placed again, moved or not.
+	api.nvim_create_autocmd("VimResized", {
+		group = self.group,
+		callback = function()
+			self:schedule(true)
 		end,
 	})
 	-- Anything else that moves text without an event of its own (a fold, a

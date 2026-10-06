@@ -51,6 +51,9 @@ session:surface("card", {
 			clicks = clicks + 1
 			-- The program answers with a delta: a=delta:op=text:t=count
 			surface:set_text("count", clicks == 1 and "1 click" or (clicks .. " clicks"))
+			-- A button takes the keyboard when clicked (SPEC §10.1), and would
+			-- keep Enter and Space from the editor: give it back (a=blur).
+			surface:blur()
 		end
 	end,
 })

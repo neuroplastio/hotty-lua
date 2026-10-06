@@ -411,6 +411,19 @@ test("the terminal can change: detected again, and the documents sent again", fu
 	return t
 end)
 
+test("a resize, which the TUI starts with an erase: every surface placed again", function(spawn)
+	local t = spawn()
+	card(t)
+	local erased = t.host.erased or 0
+	vim.fn.jobresize(t.chan, 100, 30)
+	wait(function()
+		return (t.host.erased or 0) > erased and t.host.placements["t-card"] ~= nil
+	end, "the erase, then the placement again")
+	local p = t.host.placements["t-card"]
+	eq({ p.x, p.y }, { 0, 5 })
+	return t
+end)
+
 test("relayout(true) places every surface again, changed or not", function(spawn)
 	local t = spawn()
 	card(t)
@@ -475,6 +488,7 @@ test("examples/nvim/click.lua: a button that counts its clicks", function(spawn)
 		return #d == 2 and d[2].payload == "2 clicks"
 	end, "two deltas")
 	eq(t.host:commands("delta", "click-example-card")[1].payload, "1 click")
+	eq(#t.host:commands("blur", "click-example-card"), 2, "the keyboard back to the editor")
 	return t
 end)
 
