@@ -14,9 +14,12 @@ RUNTIMES    := luajit lua5.1 "$(NVIM) -l" $(GLUA)
 
 export HOTTY_DIR
 
+# One target at a time: the Neovim tests run on timers.
+.NOTPARALLEL:
+
 .PHONY: check fmt fmt-fix core nvim vectors clean
 
-check: fmt core   ## the gate
+check: fmt core nvim   ## the gate
 
 fmt:   ## fails when stylua would change files
 	$(STYLUA) --check $(wildcard lua tests examples)

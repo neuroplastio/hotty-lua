@@ -14,8 +14,9 @@ in two layers:
   and the standard library only, so it runs under Neovim's LuaJIT, plain
   LuaJIT, PUC Lua 5.1, and gopher-lua, which plx embeds and which has no
   `bit` library.
-- `require("hotty.nvim")` is the **SDK layer** for Neovim (SDK.md §4.2).
-  It is still being written.
+- `require("hotty.nvim")` is the **SDK layer** for Neovim (SDK.md §4.2):
+  surfaces anchored to buffer positions, placed where their text is after
+  every redraw.
 
 ```lua
 local hotty = require("hotty")
@@ -67,6 +68,73 @@ Where Lua differs:
   what it sends (SPEC §3.3). The Decoder inflates `o=z` itself, with a
   small inflate in Lua, for a relay or a test that reads a program's output.
 
+## Neovim
+
+Neovim owns the terminal, so hotty.nvim reads nothing itself. The TUI hands
+over each OSC sequence and each DA1 answer as `TermResponse`, without its
+terminator, and the Decoder and the Detector take them from there; a plugin
+writes with `nvim_ui_send`. It needs Neovim 0.12 (`nvim_ui_send`).
+
+```lua
+local hotty, hn = require("hotty"), require("hotty.nvim")
+
+local session = hn.session({
+	prefix = "myplugin", -- surface names: myplugin-<name>
+	on_ready = function(mode, caps) end, -- "native", or "text": draw in cells
+})
+
+session:surface("card", {
+	html = "<button id=go>Go</button> <span id=out></span>",
+	anchor = { buf = 0, row = 4, below = true }, -- the rows below line 5
+	cols = 40,
+	rows = 2,
+	keep = true,
+	on_event = function(ev, surface)
+		if ev.kind == hotty.EVENT_CLICK and ev.target == "go" then
+			surface:set_text("out", "gone")
+		end
+	end,
+})
+```
+
+[`examples/nvim/click.lua`](examples/nvim/click.lua) is that, whole.
+
+- **The terminal** (`hn.term()`) is one per Neovim. It detects whether the
+  terminal is a host, and again when the terminal can have changed: a UI
+  attached (`UIEnter`), or a return from suspension (`VimResume`), which
+  left the alternate screen and its surfaces with it. It numbers requests
+  (`term:request(build, cb)`, 3 s) and fences (`term:fence(cb)`, 1 s), and
+  hands every message no wait took to the sessions and to `term:listen(fn)`.
+- **A session** (`hn.session(opts)`) holds a plugin's surfaces. A surface's
+  anchor is a buffer position (`{ buf, row, col }`, an extmark, so it moves
+  with edits), the rows below a line (`{ buf, row, below = true }`, with room
+  made by virtual lines), or a screen cell (`{ screen = { x, y } }`).
+- **Layout.** After the editor draws, the session places each surface at
+  its anchor's cell, clipped to its window's text with a placement window,
+  and sends only what changed: the document once, a placement when it moved,
+  `hide` (with `keep`) or `del` when it went out of view. The passes run on
+  `vim.schedule` from the editor's events (`WinScrolled`, `WinResized`,
+  `VimResized`, `WinEnter`, `TextChanged`, …) and from every redraw (a
+  decoration provider's `on_end`), since `nvim_ui_send`'s bytes go out at
+  once while the TUI writes its frame when it flushes: sent from the event
+  itself, a placement would land before the cells it goes with.
+- **Floating windows and the popup menu** are cells, and every placement is
+  above the cells (SPEC §5.2), so a surface they would cover is hidden while
+  they do (`occlude = false` turns that off).
+- **What the host loses** (`ENOENT` in answer to a placement) is sent again.
+  `session:relayout(true)` places every surface again, changed or not.
+- **Rows auto** (`rows = nil`): the first placement is numbered, and the
+  rows the host chose are kept; `fit = true` keeps them current.
+- **Closing.** `session:close()` deletes the surfaces, `session:detach_all()`
+  leaves them on the screen, detached. Sessions close on `VimLeavePre`.
+
+## plx
+
+The wire layer loads in plx's gopher-lua as it is, and a Lua program in a
+plx pane is served by plx's relay like any other. plx-script does not yet
+give a script what an SDK layer needs; [`docs/plx.md`](docs/plx.md) says
+what it would.
+
 ## Conformance
 
 `make check` is the gate. It runs, under luajit, lua5.1, `nvim -l` and glua
@@ -75,6 +143,12 @@ Where Lua differs:
 - the conformance vectors' SDK sections, `tests/vectors.lua`: wire, build,
   encode, decode, scan and detect, every vector;
 - the unit tests, `tests/unit.lua`: what the vectors leave out.
+
+And under `nvim -l`, `tests/nvim/run.lua`: each test runs a Neovim in a
+pseudo-terminal, plays its terminal with a fake host
+(`tests/nvim/fakehost.lua`, the test host of SDK.md §4.4 as far as these
+tests need it), drives it over RPC, and reads what the host was sent.
+`HOTTY_TEST=<part of a name>` runs some of them.
 
 The vectors are a copy of the spec's (`tests/vectors.json`). With a checkout
 of neuroplastio/hotty at `HOTTY_DIR` (`../../hotty/main` by default), the
