@@ -318,6 +318,23 @@ test("a surface not kept is deleted out of view, and sent again in view", functi
 	return t
 end)
 
+test("a surface set out of view is taken off the screen", function(spawn)
+	local t = spawn()
+	card(t)
+	t.lua([[T.card:set({ anchor = { screen = { 0, 500 } } })]])
+	wait(function()
+		return #t.host:commands("hide", "t-card") == 1
+	end, "the hide")
+	eq(t.host.placements["t-card"], nil)
+	t.lua([[T.card:set({ anchor = { screen = { 2, 1 } } })]])
+	wait(function()
+		local p = t.host.placements["t-card"]
+		return p and p.x == 2 and p.y == 1
+	end, "placed again")
+	eq(t.host.problems, {})
+	return t
+end)
+
 test("a surface past the window's bottom shows the part in view, through a window", function(spawn)
 	local t = spawn()
 	card(t)

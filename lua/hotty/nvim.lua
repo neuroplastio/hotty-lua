@@ -698,12 +698,16 @@ function Surface:want(covers)
 	local cols = spec.cols
 	local rows = spec.rows or self.rows
 	local pl = { cols = cols, rows = rows, z = spec.z, press = spec.press, fit = spec.fit, hover = spec.hover }
+	local flags =
+		table.concat({ tostring(spec.z or 0), tostring(spec.press), tostring(spec.fit), tostring(spec.hover) }, ":")
 	if not rows then
-		-- Auto: placed whole, unclipped, until the host says how tall.
+		-- Auto: placed whole, unclipped, until the host says how tall; placed
+		-- again where it is moved, should the host never say.
 		if not intersect({ x = at.x, y = at.y, w = 1, h = 1 }, area) then
 			return nil
 		end
-		return { x = at.x, y = at.y, placement = pl, measure = true, key = "auto" }
+		local key = table.concat({ "auto", at.x, at.y, cols, flags }, ":")
+		return { x = at.x, y = at.y, placement = pl, measure = true, key = key }
 	end
 	local rect = { x = at.x, y = at.y, w = cols, h = rows }
 	local vis = intersect(rect, area)
@@ -719,20 +723,7 @@ function Surface:want(covers)
 		pl.window = { x = vis.x - rect.x, y = vis.y - rect.y, w = vis.w, h = vis.h }
 	end
 	local w = pl.window or { x = 0, y = 0, w = cols, h = rows }
-	local key = table.concat({
-		vis.x,
-		vis.y,
-		cols,
-		rows,
-		w.x,
-		w.y,
-		w.w,
-		w.h,
-		tostring(spec.z or 0),
-		tostring(spec.press),
-		tostring(spec.fit),
-		tostring(spec.hover),
-	}, ":")
+	local key = table.concat({ vis.x, vis.y, cols, rows, w.x, w.y, w.w, w.h, flags }, ":")
 	return { x = vis.x, y = vis.y, placement = pl, key = key }
 end
 
@@ -787,7 +778,7 @@ function Session:layout()
 			local want = sf:want(covers)
 			if want then
 				sf.seen = t
-				if not sf.sent and self:room(sf) then
+				if not sf.sent and self:room(sf, add) then
 					local html = sf.spec.html
 					if type(html) == "function" then
 						html = html(sf)
@@ -829,8 +820,9 @@ function Session:layout()
 end
 
 -- Whether the host has room for one more document, making room by deleting
--- the surfaces kept out of view, the longest unseen first.
-function Session:room(sf)
+-- the surfaces kept out of view, the longest unseen first: add takes the
+-- delete, in order with the pass's other commands.
+function Session:room(sf, add)
 	if self:count_sent() < self.limit then
 		return true
 	end
@@ -845,7 +837,7 @@ function Session:room(sf)
 	if not victim then
 		return false
 	end
-	self.term:send(hotty.del(victim.id))
+	add(hotty.del(victim.id))
 	victim.sent = false
 	return true
 end
@@ -931,7 +923,8 @@ function Surface:set(spec)
 	if spec and self.sent and ((spec.html ~= nil and old.html ~= nil) or (new.scroll or 0) ~= (old.scroll or 0)) then
 		self.sent = false
 	end
-	self.placed = nil
+	-- Placed again when its placement's key changes; kept until then, so one
+	-- moved out of view is taken off the screen.
 	self.session:schedule()
 	return self
 end
