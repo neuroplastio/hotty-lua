@@ -27,11 +27,12 @@ fmt:   ## fails when stylua would change files
 fmt-fix:
 	$(STYLUA) $(wildcard lua tests examples)
 
-core: $(GLUA)   ## the conformance vectors and the unit tests, under every runtime
+core: $(GLUA)   ## the conformance vectors, the unit tests and hotty.plx's, under every runtime
 	@for r in $(RUNTIMES); do \
 		echo "== $$r"; \
 		$$r tests/vectors.lua || exit 1; \
 		$$r tests/unit.lua || exit 1; \
+		$$r tests/plx.lua || exit 1; \
 	done
 
 nvim:   ## hotty.nvim, in a Neovim whose terminal is a fake host (tests/nvim)

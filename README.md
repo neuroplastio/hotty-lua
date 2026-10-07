@@ -17,6 +17,9 @@ in two layers:
 - `require("hotty.nvim")` is the **SDK layer** for Neovim (SDK.md §4.2):
   surfaces anchored to buffer positions, placed where their text is after
   every redraw.
+- `require("hotty.plx")` is the **SDK layer** for plx scripts (SDK.md
+  §4.2): surfaces at the cells of the script's tool or rail, which plx's
+  relay moves with it.
 
 ```lua
 local hotty = require("hotty")
@@ -140,12 +143,71 @@ session:surface("card", {
 
 ## plx
 
-plx-script has the wire layer built in (`require("hotty")`, a pinned copy),
-and a Lua program in a plx pane is served by plx's relay like any other.
-`hotty.base64` and `hotty.inflate` are seams: a host may preload native
-modules with the same functions, and plx does for base64.
+plx owns the terminal and knows whether it is a host, so hotty.plx detects
+nothing and reads nothing itself. plx hands a script the host's
+capabilities (`ctx:hotty().raw`, and `on_hotty_caps` when the host
+changes) and every HOTTY message for its surfaces (`on_hotty`), and writes
+what it sends (`ctx:hotty_send`) between its frames. Its relay names the
+script's surfaces apart from every other program's, places them where the
+tool or rail is on the screen, moves and clips them with it, and hides them
+under whatever plx draws over it.
+
+```lua
+local hotty, hplx = require("hotty"), require("hotty.plx")
+
+local t = plx.tool({ id = "mytool", edge = "right", size = 32 })
+local session = hplx.session(t) -- takes t.on_hotty, on_hotty_caps, on_resize
+
+function t.init(ctx)
+	session:attach(ctx) -- the host plx knows: "native", or "text"
+	session:surface("card", {
+		html = "<button id=go>Go</button> <span id=out></span>",
+		x = 0, -- the tool's own cells, from its top left
+		y = 0,
+		cols = 30,
+		rows = 2,
+		on_event = function(ev, surface)
+			if ev.kind == hotty.EVENT_CLICK and ev.target == "go" then
+				surface:set_text("out", "gone")
+			end
+		end,
+	})
+end
+
+function t.render(ctx)
+	-- Cells under the surface on a host; the same thing in cells elsewhere.
+	return session:native() and ui.box({ h = 2 }) or ui.text("[ Go ]")
+end
+```
+
+[`examples/plx/click.lua`](examples/plx/click.lua) is a whole tool.
+
+- **A session** (`hplx.session(tool, opts)`) holds a script's surfaces.
+  Given the tool, it sets its `on_hotty`, `on_hotty_caps` and `on_resize`,
+  calling any the tool had; a script that sets its own afterwards calls
+  `session:hotty(ctx, seq)`, `:hotty_caps(ctx, raw)` and `:resize(ctx)`
+  from it. `session:attach(ctx)` in `init` reads the host: plx calls
+  `on_hotty_caps` only when it changes.
+- **Layout.** A surface is at `x`, `y` in the tool's cells. The session
+  sends the document once and places it, clipped to the tool with a
+  placement window, and then only what changed: a placement when it moved,
+  `hide` (with `keep`) or `del` when it went out of view (`shown = false`,
+  or past the tool's cells). Each change is laid out at once.
+- **A new host** has none of the surfaces: every document goes again, and
+  `on_ready(mode, caps)` runs. So does an `ENOENT`.
+- **Rows auto** (`rows = nil`): the first placement is numbered, and the
+  rows the host chose are kept once plx hands back numbered replies;
+  `fit = true` keeps them current. Requests time out on `plx.after`.
+- **A name a `ui.hotty` uses** is not the session's to take; `prefix`
+  keeps them apart.
+- **Closing.** `session:close()` deletes the surfaces. plx's relay takes no
+  `detach`, so there is no `detach_all`.
+
+plx-script has a pinned copy of `lua/hotty/` built in, all but `nvim.lua`.
+`hotty.base64` and `hotty.inflate` are seams: a host may
+preload native modules with the same functions, and plx does for base64.
 [`docs/plx.md`](docs/plx.md) has their contract, and the primitives
-`hotty.plx` is being built on, as agreed with plexos.
+hotty.plx is built on, as agreed with plexos.
 
 ## Conformance
 
@@ -154,7 +216,10 @@ modules with the same functions, and plx does for base64.
 
 - the conformance vectors' SDK sections, `tests/vectors.lua`: wire, build,
   encode, decode, scan and detect, every vector;
-- the unit tests, `tests/unit.lua`: what the vectors leave out.
+- the unit tests, `tests/unit.lua`: what the vectors leave out;
+- hotty.plx's tests, `tests/plx.lua`, against a fake plx-script (a `ctx`
+  with the primitives, and `plx.after` on a clock the test turns), and the
+  plx example in it.
 
 And under `nvim -l`, `tests/nvim/run.lua`: each test runs a Neovim in a
 pseudo-terminal, plays its terminal with a fake host

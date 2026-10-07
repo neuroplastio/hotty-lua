@@ -57,34 +57,43 @@ no fences. What plx-script gives it, as agreed:
 
 1. **The caps, whole.** `ctx:hotty()` keeps `{ v, host, scheme, dark }`
    (nil for no host) and gains `raw`, the caps JSON as plx relays it. A
-   change of host calls `on_hotty_caps(ctx, raw)`, raw nil for none, before
-   the redraw it causes. The adapter reads `hotty.caps(hotty.json.decode(raw))`
-   and sends its documents again.
+   change of host, and only a change (never the start), calls
+   `on_hotty_caps(ctx, raw)`, raw nil for none, before the `on_show` it
+   causes; it draws no frame itself. The adapter reads
+   `hotty.caps(hotty.json.decode(raw))` and sends its documents again.
 2. **Sending.** `ctx:hotty_send(s)` writes HOTTY commands (the builders'
    strings) for the script's own surfaces to the instance's output, in
    order with plx's frames and never inside one. The relay prefixes the
    names, and places them in the instance's own cells, moved and clipped
    with it. Any action passes; `a=q` is never answered. A name a `ui.hotty`
-   uses is not the script's to send. It returns false, and sends nothing,
-   when there is no host.
+   uses is not the script's to send. It returns true toward a host; false,
+   sending nothing, when there is none; and false and an error when the
+   write fails. The relay takes `res`, `del`, `doc`, `delta`, `focus`,
+   `blur`, `hide` and `place`, and ignores `detach`.
 3. **Input.** `on_hotty(ctx, seq)` gets every HOTTY message plx routes to
    the instance, events and replies, each as one complete OSC 7279 sequence
-   the way a host writes it, the surface named as the script named it. The
-   adapter feeds `hotty.decoder()`. For a `ui.hotty` surface's event,
-   `on_hotty` runs first, then `on_event`, then one draw.
+   the way a host writes it (a long one chunked, several calls), never
+   compressed, the surface named as the script named it. The adapter feeds
+   one `hotty.decoder()` with every call. Each event then reaches
+   `on_event` too, and one frame follows.
 4. **Replies.** The relay hands back what a script's commands asked for:
    errors (`ENOENT`, `EQUOTA` …) first, then the `ok` of a numbered command,
    with the script's `n` and `re` and its surface name, and a placement's
    `c` and `r`. plx numbers what it forwards on the host itself.
 5. **Time.** `plx.after(ms, fn)` runs `fn(ctx)` once, shown or hidden, then
-   draws, and returns a handle with `:cancel()`; `plx.now()` is milliseconds
-   on a monotonic clock. Requests time out on it.
+   draws when shown, and returns a handle with `:cancel()`; not at the top
+   level. `plx.now()` is milliseconds on a monotonic clock. Requests time
+   out on it.
 6. **Geometry.** `ctx:size()` is the instance's cells, and
-   `on_resize(ctx, cols, rows)` runs before the redraw a resize causes. A
-   cell's pixels are in the caps (`cell`, `scale`).
+   `on_resize(ctx, cols, rows)` runs before the frame at the new size (a
+   rail's rows are 1). A cell's pixels are in the caps (`cell`, `scale`).
 
-plexos builds the seam, then 1–3, 5 and 6, then 4; `hotty.plx`
-(`lua/hotty/plx.lua`) follows, tested here against a fake `ctx`.
+`plx.has("hotty_send")` says whether a plx-script has 1–3, and
+`plx.has("after")` whether it has 5. plexos 7a37ef4 has the seam and
+6fedf38 has 1–3, 5 and 6; 4 is next. hotty.plx (`lua/hotty/plx.lua`, the
+README's plx section) is built on them, and `tests/plx.lua` tests it
+against a fake plx-script with these details. Without `ctx:hotty_send`, a
+session is in text mode.
 
 ## gopher-lua, for any script
 
