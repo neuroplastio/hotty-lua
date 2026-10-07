@@ -82,15 +82,18 @@ no fences. What plx-script gives it, as agreed:
    (`q=0`). The reply carries the script's own `n` (none if it gave none),
    `s` renamed back when the host's has one, and the rest as the host wrote
    it; a resource's (`res`, `del` of one) is answered by `n` alone. For
-   `doc`, `delta`, `res`, `del`, `focus` and `blur`. Placements, agreed and
-   to land: the relay places a script's surfaces itself, so when the host
-   rejects its placement of one (`ENOENT`: the host lost the document) the
-   error goes to the script as `re=place`, with the `n` of the script's
-   last place of it, if it had one, and only if that place asked for
-   errors (`q` ≤ 1). A numbered place is answered with its `c` and `r`; at
-   `r=auto` the relay measures and the rows are the host's, once the
-   instance is on the screen. A numbered `hide` is answered too. hotty.plx
-   keeps rows that come after their request gave up.
+   `doc`, `delta`, `res`, `del`, `focus` and `blur`, and for placements:
+   - a numbered place with its rows given is answered at once, with its
+     `c` and `r`;
+   - at `r=auto` the relay measures on the next frame that shows the
+     instance, and answers with the host's rows, so a hidden tool's answer
+     can come after hotty.plx stopped waiting (it keeps the rows then);
+   - the relay places a script's surfaces itself, so when the host rejects
+     its placement of one (`ENOENT`: the host lost the document) the error
+     goes to the script as `re=place`, if the script's last place of it
+     asked for errors (`q` ≤ 1): with that place's `n` until its `ok` was
+     given, and none after;
+   - a numbered `hide` is answered too.
 5. **Time.** `plx.after(ms, fn)` runs `fn(ctx)` once, shown or hidden, then
    draws when shown, and returns a handle with `:cancel()`; not at the top
    level. `plx.now()` is milliseconds on a monotonic clock. Requests time
@@ -101,8 +104,9 @@ no fences. What plx-script gives it, as agreed:
 
 `plx.has("hotty_send")` says whether a plx-script has 1–3, and
 `plx.has("after")` whether it has 5. In plexos, 7a37ef4 has the seam,
-6fedf38 has 1–3, 5 and 6, 5ba420f has 4 but for placements, and a39dd4e
-vendors hotty.plx. hotty.plx (`lua/hotty/plx.lua`, the README's plx
+6fedf38 has 1–3, 5 and 6, and 5ba420f and dee0eb4 have 4; dee0eb4 vendors
+hotty-lua 8ee7185. A pane program's replies are still the plxd's own
+(plexos HOTTY-PANE-REPLY-01, for the maintainer). hotty.plx (`lua/hotty/plx.lua`, the README's plx
 section) is built on them, and `tests/plx.lua` tests it against a fake
 plx-script with these details. Without `ctx:hotty_send`, a session is in
 text mode.

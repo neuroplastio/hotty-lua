@@ -196,8 +196,9 @@ end
 - **A new host** has none of the surfaces: every document goes again, and
   `on_ready(mode, caps)` runs. So does an `ENOENT`.
 - **Rows auto** (`rows = nil`): the first placement is numbered, and the
-  rows the host chose are kept once plx hands back numbered replies;
-  `fit = true` keeps them current. Requests time out on `plx.after`.
+  rows the host chose are kept. plx answers it once the tool is on the
+  screen, so the rows may come after the request's 3 s on `plx.after`;
+  they are kept then too. `fit = true` keeps them current.
 - **A name a `ui.hotty` uses** is not the session's to take; `prefix`
   keeps them apart.
 - **Closing.** `session:close()` deletes the surfaces. plx's relay takes no
