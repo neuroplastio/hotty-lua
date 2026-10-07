@@ -76,10 +76,14 @@ no fences. What plx-script gives it, as agreed:
    compressed, the surface named as the script named it. The adapter feeds
    one `hotty.decoder()` with every call. Each event then reaches
    `on_event` too, and one frame follows.
-4. **Replies.** The relay hands back what a script's commands asked for:
-   errors (`ENOENT`, `EQUOTA` …) first, then the `ok` of a numbered command,
-   with the script's `n` and `re` and its surface name, and a placement's
-   `c` and `r`. plx numbers what it forwards on the host itself.
+4. **Replies.** The relay numbers what it forwards on the host itself and
+   hands back what a script's command asked for, through `on_hotty` (no
+   `on_event` follows): an error unless `q=2`, an `ok` only when numbered
+   (`q=0`). The reply carries the script's own `n` (none if it gave none),
+   `s` renamed back when the host's has one, and the rest as the host wrote
+   it; a resource's (`res`, `del` of one) is answered by `n` alone. For
+   `doc`, `delta`, `res`, `del`, `focus` and `blur`; a placement's (its `c`
+   and `r`, for auto rows) is to come.
 5. **Time.** `plx.after(ms, fn)` runs `fn(ctx)` once, shown or hidden, then
    draws when shown, and returns a handle with `:cancel()`; not at the top
    level. `plx.now()` is milliseconds on a monotonic clock. Requests time
@@ -89,11 +93,12 @@ no fences. What plx-script gives it, as agreed:
    rail's rows are 1). A cell's pixels are in the caps (`cell`, `scale`).
 
 `plx.has("hotty_send")` says whether a plx-script has 1–3, and
-`plx.has("after")` whether it has 5. plexos 7a37ef4 has the seam and
-6fedf38 has 1–3, 5 and 6; 4 is next. hotty.plx (`lua/hotty/plx.lua`, the
-README's plx section) is built on them, and `tests/plx.lua` tests it
-against a fake plx-script with these details. Without `ctx:hotty_send`, a
-session is in text mode.
+`plx.has("after")` whether it has 5. In plexos, 7a37ef4 has the seam,
+6fedf38 has 1–3, 5 and 6, 5ba420f has 4 but for placements, and a39dd4e
+vendors hotty.plx. hotty.plx (`lua/hotty/plx.lua`, the README's plx
+section) is built on them, and `tests/plx.lua` tests it against a fake
+plx-script with these details. Without `ctx:hotty_send`, a session is in
+text mode.
 
 ## gopher-lua, for any script
 

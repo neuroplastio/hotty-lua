@@ -341,6 +341,38 @@ test("auto rows: a numbered placement, then the host's rows", function()
 	eq(cmds[1].control.n, nil)
 end)
 
+-- As plexos 5ba420f forwards them: the script's n, s renamed back when the
+-- host's reply has one, and a resource's reply by n alone.
+test("requests: a numbered delta's ok, and a resource's by n alone", function()
+	local s, ctx = setup()
+	s:surface("card", card())
+	sent(ctx)
+	local got = {}
+	local n = s:request(function(o)
+		return hotty.set_text("card", "n", "1", o)
+	end, function(r)
+		got.delta = r
+	end)
+	local cmds = sent(ctx)
+	eq(actions(cmds), "delta card")
+	eq(cmds[1].control.n, tostring(n))
+	eq(cmds[1].control.q, "0")
+	s:hotty(ctx, hotty.encode({ { "a", "ok" }, { "re", "delta" }, { "n", tostring(n) }, { "s", "card" } }))
+	eq(got.delta.ok, true)
+	eq(got.delta.surface, "card")
+	local m = s:request(function(o)
+		return hotty.res("logo", "image/png", "png", o)
+	end, function(r)
+		got.res = r
+	end)
+	eq(m, n + 1)
+	s:hotty(ctx, hotty.encode({ { "a", "err" }, { "re", "res" }, { "n", tostring(m) } }, '{"code":"EBUDGET"}'))
+	eq(got.res.ok, false)
+	eq(got.res:err().code, "EBUDGET")
+	eq(next(s.requests), nil)
+	eq(s:hotty(ctx, hotty.encode({ { "a", "ok" }, { "re", "res" }, { "n", "99" } })), false, "no request of ours")
+end)
+
 test("a request times out on plx.after, and is not asked again", function()
 	local s, ctx, p = setup()
 	local sf = s:surface("card", card({ rows = false }))
