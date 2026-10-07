@@ -140,10 +140,12 @@ session:surface("card", {
 
 ## plx
 
-The wire layer loads in plx's gopher-lua as it is, and a Lua program in a
-plx pane is served by plx's relay like any other. plx-script does not yet
-give a script what an SDK layer needs; [`docs/plx.md`](docs/plx.md) says
-what it would.
+plx-script has the wire layer built in (`require("hotty")`, a pinned copy),
+and a Lua program in a plx pane is served by plx's relay like any other.
+`hotty.base64` and `hotty.inflate` are seams: a host may preload native
+modules with the same functions, and plx does for base64.
+[`docs/plx.md`](docs/plx.md) has their contract, and the primitives
+`hotty.plx` is being built on, as agreed with plexos.
 
 ## Conformance
 
@@ -175,8 +177,8 @@ runner fails when the copy differs; `make vectors` updates it.
 
 ## gopher-lua
 
-plx runs scripts in gopher-lua v1.1.2 with its default options. Three of its
-limits shape this code, and any plx script:
+plx runs scripts in gopher-lua v1.1.2. Three of its limits shape this code,
+and any plx script:
 
 - **`table.concat` overflows** its fixed-size registry at a few thousand
   strings, so the SDK joins in batches (`hotty.join`).

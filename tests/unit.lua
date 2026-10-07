@@ -103,6 +103,20 @@ test("base64: without padding, with whitespace; malformed", function()
 	eq(base64.decode("Zm9v-_"), nil, "the URL alphabet")
 end)
 
+-- What a host's own hotty.base64 must do too (docs/plx.md): every byte %s
+-- matches is skipped, up to two "=" at the end are dropped whatever the
+-- length, and bits past the last byte are ignored.
+test("base64: the edges a native hotty.base64 keeps", function()
+	eq(base64.decode("Zm\t9v\vYm\fE="), "fooba", "%s, not only CR and LF")
+	eq(base64.decode("Zm9vYg="), "foob", "one = where two belong")
+	eq(base64.decode("Zm9vYmE=="), "fooba", "two = where one belongs")
+	eq(base64.decode("Zm9v="), "foo", "= after a whole group")
+	eq(base64.decode("Zm9v==="), nil, "three =")
+	eq(base64.decode("Zm9vYh"), "foob", "bits past the last byte")
+	eq(base64.decode(""), "")
+	eq(base64.encode(""), "")
+end)
+
 test("base64: a large payload, for gopher-lua's table.concat", function()
 	local s = bytes(300000, 3)
 	local b = base64.encode(s)
@@ -227,6 +241,21 @@ test("inflate: malformed streams", function()
 	ok(inflate.zlib("\120\156\7\0") == nil, "a reserved block type")
 end)
 
+-- What a host's own hotty.inflate must do too (docs/plx.md).
+test("inflate: the edges a native hotty.inflate keeps", function()
+	local good = stored("hello")
+	eq(inflate.zlib(good .. "after"), "hello", "bytes after the checksum")
+	-- FDICT set, and the header check made good again.
+	ok(inflate.zlib("\120\187" .. good:sub(3)) == nil, "a preset dictionary")
+	ok(inflate.zlib("\136\28" .. good:sub(3)) == nil, "a window past 32 KiB")
+	local max = inflate.MAX
+	inflate.MAX = 4
+	local out, err = inflate.zlib(good)
+	inflate.MAX = max
+	eq(out, nil, "more than MAX bytes")
+	eq(type(err), "string")
+end)
+
 test("decoder: o=z is inflated, and bad zlib is malformed", function()
 	local dec = hotty.decoder()
 	local z = base64.encode(stored("<p>hi</p>"))
@@ -244,6 +273,45 @@ test("decoder: o=z is inflated, and bad zlib is malformed", function()
 	})
 	r, m = custom:feed("\27]7279;a=doc:s=x:o=z;" .. z)
 	eq(m.payload, "mine")
+end)
+
+-- seams -----------------------------------------------------------------------
+
+-- A host may preload its own hotty.base64 and hotty.inflate (docs/plx.md):
+-- init.lua reaches them only through require.
+test("seams: init.lua uses the hotty.base64 and hotty.inflate it is given", function()
+	local calls = { encode = 0, decode = 0, zlib = 0 }
+	local saved = { package.loaded["hotty"], package.loaded["hotty.base64"], package.loaded["hotty.inflate"] }
+	package.loaded["hotty.base64"] = {
+		encode = function(s)
+			calls.encode = calls.encode + 1
+			return base64.encode(s)
+		end,
+		decode = function(s)
+			calls.decode = calls.decode + 1
+			return base64.decode(s)
+		end,
+	}
+	package.loaded["hotty.inflate"] = {
+		zlib = function(s)
+			calls.zlib = calls.zlib + 1
+			return inflate.zlib(s)
+		end,
+	}
+	package.loaded["hotty"] = nil
+	local loaded, fresh = pcall(require, "hotty")
+	package.loaded["hotty"], package.loaded["hotty.base64"], package.loaded["hotty.inflate"] =
+		saved[1], saved[2], saved[3]
+	ok(loaded, tostring(fresh))
+	eq(fresh.doc("x", "<p>hi</p>"), hotty.doc("x", "<p>hi</p>"))
+	eq(calls.encode, 1, "encode")
+	local r, m = fresh.decoder():feed("\27]7279;a=ev:s=x:e=click;" .. base64.encode("{}") .. "\27\\")
+	eq(r, hotty.COMPLETE)
+	eq(m.payload, "{}")
+	eq(calls.decode, 1, "decode")
+	r, m = fresh.decoder():feed("\27]7279;a=doc:s=x:o=z;" .. base64.encode(stored("<p>hi</p>")) .. "\27\\")
+	eq(m.payload, "<p>hi</p>")
+	eq(calls.zlib, 1, "zlib")
 end)
 
 -- encode ----------------------------------------------------------------------

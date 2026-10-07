@@ -1,16 +1,19 @@
 # hotty-lua in plx
 
-What a plx adapter for hotty-lua would need, from plexos as of 36cb03b
-(2026-10-06). Nothing here changes plexos; it is for whoever owns it.
+How hotty-lua runs in plx, and what `hotty.plx`, the adapter of SDK.md §4.2
+for plx scripts, is built on. plexos owns plx's side; this is what the two
+agreed on 2026-10-07 (plexos `vault/tasks/hotty-sdks.md`, HOTTY-LUA-01).
 
 ## What runs today
 
-- **The wire layer loads.** plx-script (`cmd/plx-script/vm.go`) makes each
-  script's state with `lua.NewState()`: gopher-lua v1.1.2, its default
-  options, every standard library, and no `bit`. `make check` runs the
-  conformance vectors and the unit tests under glua v1.1.2, the same
-  interpreter. A script finds the SDK by adding its `lua/` directory to
-  `package.path`, which plx leaves at gopher-lua's default.
+- **plx-script has the wire layer built in.** Since plexos 8b1b3a0 it vendors
+  a pinned copy of `lua/hotty/` (all but `nvim.lua`), embeds it, and
+  preloads it into every script's state, so `require("hotty")` works with
+  no `package.path`. `make hotty-lua REV=<sha>` in plexos refreshes the copy.
+  The state is gopher-lua v1.1.2 with every standard library, no `bit`, and
+  a registry raised for `table.concat` over many strings. `make check` here
+  runs the conformance vectors and the unit tests under glua v1.1.2, the
+  same interpreter.
 - **A program in a pane needs nothing.** A pure Lua program (luajit,
   lua5.1, glua) in a plx pane that speaks HOTTY on its own terminal is
   already served by plx: plxd answers its query, `pkg/hottyrelay` names its
@@ -21,51 +24,79 @@ What a plx adapter for hotty-lua would need, from plexos as of 36cb03b
   Lua (it has no way to read a terminal without a C module, and luajit's FFI
   is the only one at hand).
 
-## What a plx script lacks
+## Native modules
 
-A script is a tool or a rail (`plx.tool{…}`, `plx.rail{…}`), run in its own
-process in a pty, and draws with `ui.*` elements. Its HOTTY today is
-`ui.hotty{id, html, css}`, `ctx:hotty()` (the host's name, version and
-scheme) and events through `on_event` with `source = "hotty"`. An adapter
-of SDK.md §4.2 would need, from plx:
+`init.lua` reaches base64 and zlib only through `require("hotty.base64")`
+and `require("hotty.inflate")`, when it loads. A host may put its own
+modules with the same functions in `package.preload` (or `package.loaded`)
+before the first `require("hotty")`; plx does, for base64, since gopher-lua
+runs the Lua one at a few MB/s. `tests/unit.lua` checks that `init.lua`
+uses what it is given, and pins the edges below.
 
-1. **The capabilities, whole.** `ctx:hotty()` gives `v`, `host`, `scheme`
-   and `dark`; the SDK reads every field (`hotty.caps(table)` takes the
-   decoded object). plx already pushes the full caps to tools as the
-   `hotty.caps` notification; handing the script the decoded object, or
-   the raw JSON, is enough. A script would then not detect at all: plx
-   knows (SDK.md §4.1's `known`).
-2. **A way to send commands for its own surfaces**, at least `doc`, `delta`
-   and `del`, with the relay keeping its prefix and placement: the
-   builders' output (`hotty.set_text(...)`) as bytes, or the decoded
-   messages. Writing raw OSC 7279 to stdout reaches the relay today (gopher-
-   lua's `io.stdout` is the tool's pty, which plx scans), but it mixes with
-   plxdk's own writes, and a query there is never answered.
-3. **Events as messages.** `on_event` gets plx's own event table; the SDK's
-   `Event` accessors (`value()`, `fields()`, `drag()` …) need the control
-   and the payload: either `hotty.decoder()` fed the raw sequence, or plx
-   building an `Event` with `hotty.Message`.
-4. **Replies.** The errors of `q=1` commands, and the replies of numbered
-   ones, for requests and for `ENOENT` (a lost document).
-5. **One-shot timers.** `plx.timer(ms, fn)` repeats, from 100 ms, and only
-   while the tool is shown. Requests (3 s), fences (1 s) and the Detector
-   need a one-shot timer, or a clock (`now`) and a tick the script can ask
-   for.
-6. **Geometry and its changes.** A tool's own surfaces are placed by plx
-   (the relay moves and clips them with the pane), so a script that only
-   shows its own documents needs none. One that places surfaces itself
-   needs its cell size and an event when it changes; today a resize only
-   calls `render`.
+- `hotty.base64.encode(s)`: the base64 of `s`, standard alphabet, padded.
+- `hotty.base64.decode(s)`: the bytes, or nil. It removes every byte Lua's
+  `%s` matches (space, `\t`, `\n`, `\v`, `\f`, `\r`), then up to two `=`
+  at the end whatever the length; nil if a byte outside `A-Za-z0-9+/` is
+  left, or the length is one more than a multiple of 4. Bits past the last
+  byte are ignored.
+- `hotty.inflate.zlib(s)`: the bytes, or nil and an error: a header that
+  is not deflate (method 8, a window of at most 32 KiB, the check), a preset
+  dictionary, a bad stream, an Adler-32 that does not match, or more than
+  `MAX` bytes out (16 MiB; `init.lua` does not read it). Bytes after the
+  checksum are ignored.
+
+`hotty.json` and `hotty.join` are not seams: decode marks its tables
+(`json.is_object`, `json.is_array`, `json.null`), and `hotty.caps` and
+`Event` read those marks.
+
+## The primitives
+
+`hotty.plx` is a push environment: plx knows the host, reads the terminal
+and writes for the script, so the adapter needs no Scanner, no Detector and
+no fences. What plx-script gives it, as agreed:
+
+1. **The caps, whole.** `ctx:hotty()` keeps `{ v, host, scheme, dark }`
+   (nil for no host) and gains `raw`, the caps JSON as plx relays it. A
+   change of host calls `on_hotty_caps(ctx, raw)`, raw nil for none, before
+   the redraw it causes. The adapter reads `hotty.caps(hotty.json.decode(raw))`
+   and sends its documents again.
+2. **Sending.** `ctx:hotty_send(s)` writes HOTTY commands (the builders'
+   strings) for the script's own surfaces to the instance's output, in
+   order with plx's frames and never inside one. The relay prefixes the
+   names, and places them in the instance's own cells, moved and clipped
+   with it. Any action passes; `a=q` is never answered. A name a `ui.hotty`
+   uses is not the script's to send. It returns false, and sends nothing,
+   when there is no host.
+3. **Input.** `on_hotty(ctx, seq)` gets every HOTTY message plx routes to
+   the instance, events and replies, each as one complete OSC 7279 sequence
+   the way a host writes it, the surface named as the script named it. The
+   adapter feeds `hotty.decoder()`. For a `ui.hotty` surface's event,
+   `on_hotty` runs first, then `on_event`, then one draw.
+4. **Replies.** The relay hands back what a script's commands asked for:
+   errors (`ENOENT`, `EQUOTA` …) first, then the `ok` of a numbered command,
+   with the script's `n` and `re` and its surface name, and a placement's
+   `c` and `r`. plx numbers what it forwards on the host itself.
+5. **Time.** `plx.after(ms, fn)` runs `fn(ctx)` once, shown or hidden, then
+   draws, and returns a handle with `:cancel()`; `plx.now()` is milliseconds
+   on a monotonic clock. Requests time out on it.
+6. **Geometry.** `ctx:size()` is the instance's cells, and
+   `on_resize(ctx, cols, rows)` runs before the redraw a resize causes. A
+   cell's pixels are in the caps (`cell`, `scale`).
+
+plexos builds the seam, then 1–3, 5 and 6, then 4; `hotty.plx`
+(`lua/hotty/plx.lua`) follows, tested here against a fake `ctx`.
 
 ## gopher-lua, for any script
 
-Three limits of gopher-lua v1.1.2 under plx's default options shaped
-hotty-lua, and bite any plx script:
+Three limits of gopher-lua v1.1.2 shaped hotty-lua, and bite any plx
+script:
 
 - `table.concat` overflows the fixed-size registry at a few thousand
-  strings ("registry overflow").
+  strings ("registry overflow"). `RegistrySize` and `RegistryMaxSize` are
+  options; plx-script raises them for every state.
 - A pattern with a repetition over long input fails ("pattern/input too
-  complex").
+  complex"). The limit is a constant in gopher-lua's `pm` package
+  (`maxRecursionLevel`), not an option, so code avoids such patterns.
 - Once `pcall` catches an error, a closure no longer shares its caller's
   locals: the caller's open upvalues are closed with the error.
 
@@ -76,6 +107,4 @@ inc(); pcall(error, "x"); inc()
 print(c) -- 2 in Lua 5.1 and LuaJIT, 1 in gopher-lua v1.1.2
 ```
 
-The first two are options plx could raise (`RegistrySize`,
-`RegistryMaxSize`); the third is a bug to report upstream, or to fix in a
-fork.
+The third is a bug to report upstream, or to fix in a fork.
