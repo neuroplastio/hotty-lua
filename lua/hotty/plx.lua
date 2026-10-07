@@ -274,9 +274,20 @@ function Session:message(msg)
 		return true
 	end
 	local r = msg:reply()
+	if r and r.ok then
+		-- A placement's rows that came after its request gave up (plx answers
+		-- an instance's once it is on the screen): kept, as in time.
+		if r.re == "place" and r.rows and not sf.spec.rows and r.rows ~= sf.rows then
+			sf.rows, sf.measuring, sf.placed = r.rows, false, nil
+			self:schedule()
+			return true
+		end
+		return false
+	end
 	if r and not r.ok then
 		if r.code == hotty.ENOENT then
-			-- The host lost the document.
+			-- The host lost the document: plx's relay says so in answer to its
+			-- own placement of the surface (re=place).
 			sf.sent, sf.placed = false, nil
 			self:schedule()
 		elseif r.code == hotty.EQUOTA and r.re == "doc" then

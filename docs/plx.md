@@ -82,8 +82,15 @@ no fences. What plx-script gives it, as agreed:
    (`q=0`). The reply carries the script's own `n` (none if it gave none),
    `s` renamed back when the host's has one, and the rest as the host wrote
    it; a resource's (`res`, `del` of one) is answered by `n` alone. For
-   `doc`, `delta`, `res`, `del`, `focus` and `blur`; a placement's (its `c`
-   and `r`, for auto rows) is to come.
+   `doc`, `delta`, `res`, `del`, `focus` and `blur`. Placements, agreed and
+   to land: the relay places a script's surfaces itself, so when the host
+   rejects its placement of one (`ENOENT`: the host lost the document) the
+   error goes to the script as `re=place`, with the `n` of the script's
+   last place of it, if it had one, and only if that place asked for
+   errors (`q` ≤ 1). A numbered place is answered with its `c` and `r`; at
+   `r=auto` the relay measures and the rows are the host's, once the
+   instance is on the screen. A numbered `hide` is answered too. hotty.plx
+   keeps rows that come after their request gave up.
 5. **Time.** `plx.after(ms, fn)` runs `fn(ctx)` once, shown or hidden, then
    draws when shown, and returns a handle with `:cancel()`; not at the top
    level. `plx.now()` is milliseconds on a monotonic clock. Requests time
