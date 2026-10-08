@@ -1,5 +1,7 @@
 -- Runs the conformance vectors' SDK sections against hotty: wire, build,
--- encode, decode, scan and detect (conformance/README.md in neuroplastio/hotty).
+-- encode, decode, scan, detect, keys, keymap and edit (conformance/README.md
+-- in neuroplastio/hotty). Characters are code points here, so the vectors
+-- that require graphemes are skipped.
 --
 --   <lua> tests/vectors.lua [vectors.json]
 --
@@ -604,6 +606,80 @@ local function same_json(a, b, path)
 	return true
 end
 
+-- keys, keymap, edit -----------------------------------------------------------
+
+local function run_keys(v)
+	if v.input ~= nil then
+		local got = hotty.decode_keys(v.input)
+		local same = #got == #v.keys
+		for i, want in ipairs(v.keys) do
+			local g = got[i] or nil
+			same = same and ((absent(want) and g == nil) or g == want)
+		end
+		return same, show(got) .. ", want " .. show(v.keys)
+	end
+	local got = hotty.parse_key(v.key)
+	return equal(got, v.canon), show(got) .. ", want " .. show(v.canon)
+end
+
+local function run_keymap(v)
+	if v.lookup == nil then
+		local got = hotty.parse_keymap(v.parse ~= nil and v.parse or hotty.TERMINAL_KEYS):format()
+		return got == v.format, show(got) .. ", want " .. show(v.format)
+	end
+	local layers = {}
+	if v.terminal_keys then
+		layers[1] = hotty.TERMINAL_KEYS
+	end
+	for _, k in ipairs(v.keys) do
+		layers[#layers + 1] = k
+	end
+	local m = hotty.resolve(v.multiline, unpack(layers))
+	for key, want in pairs(v.lookup) do
+		local got = m:lookup(key)
+		if not equal(got, want) then
+			return false, show(key) .. ": " .. show(got) .. ", want " .. show(want)
+		end
+	end
+	return true
+end
+
+local function run_edit(v)
+	local f = v.field
+	local fld = hotty.field({
+		value = f.value,
+		caret = f.caret,
+		multiline = f.multiline == true,
+		password = f.password == true,
+		rows = not absent(f.rows) and f.rows or 1,
+	})
+	for i, st in ipairs(v.steps) do
+		local changed
+		if st["do"] ~= nil then
+			changed = fld["do"](fld, st["do"])
+		else
+			changed = fld:type(st.type)
+		end
+		local got = { value = fld.value, caret = fld.caret, changed = changed }
+		for _, k in ipairs({ "value", "caret", "changed" }) do
+			if st[k] ~= nil and not equal(got[k], st[k]) then
+				return false,
+					"step "
+						.. i
+						.. " ("
+						.. show(st["do"] or st.type)
+						.. "): "
+						.. k
+						.. " "
+						.. show(got[k])
+						.. ", want "
+						.. show(st[k])
+			end
+		end
+	end
+	return true
+end
+
 local function main()
 	local path = arg and arg[1] or (root .. "/tests/vectors.json")
 	local text = assert(read(path), "cannot read " .. path)
@@ -641,6 +717,9 @@ local function main()
 		{ "decode", run_decode },
 		{ "scan", run_scan },
 		{ "detect", run_detect },
+		{ "keys", run_keys },
+		{ "keymap", run_keymap },
+		{ "edit", run_edit },
 	}
 	for _, s in ipairs(sections) do
 		local section, run = s[1], s[2]
@@ -660,7 +739,19 @@ local function main()
 			end
 		end
 	end
-	for _, s in ipairs({ "json", "copy", "wire", "build", "encode", "decode", "scan", "detect" }) do
+	for _, s in ipairs({
+		"json",
+		"copy",
+		"wire",
+		"build",
+		"encode",
+		"decode",
+		"scan",
+		"detect",
+		"keys",
+		"keymap",
+		"edit",
+	}) do
 		local c = counts[s]
 		if c then
 			print(string.format("%-7s %d passed%s", s, c[1], c[2] > 0 and (", " .. c[2] .. " failed") or ""))

@@ -10,7 +10,8 @@ in two layers:
 
 - `require("hotty")` is the **wire layer** (SDK.md §3): it builds commands,
   decodes what the host sends, cuts HOTTY sequences out of a byte stream,
-  and decides whether the terminal is a host. It does no I/O. It is Lua 5.1
+  decides whether the terminal is a host, and names keys and keymaps. It
+  does no I/O. It is Lua 5.1
   and the standard library only, so it runs under Neovim's LuaJIT, plain
   LuaJIT, PUC Lua 5.1, and gopher-lua, which plx embeds and which has no
   `bit` library.
@@ -55,6 +56,7 @@ an error.
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1 })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
+| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `INSERT` |
 | messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
 
 Where Lua differs:
@@ -70,10 +72,40 @@ Where Lua differs:
 - **The scroll axes** are also `scroll_vertical` and `scroll_horizontal`,
   as SDK.md's Appendix A spells them for Lua; every other constant here is
   in upper case.
+- **`decode_keys`** puts `false` where the input is no key, since `nil`
+  would end the list.
+- **Characters are code points,** CR LF one: Lua has no grapheme
+  segmentation, so `decode_keys` and the Field split `e` and a combining
+  accent in two, and the runner skips the vectors that require
+  `graphemes` (SDK.md §4.6). `parse_key` makes a capital of a letter with
+  Shift in ASCII, Latin-1 and the basic Greek and Cyrillic alphabets.
 - **zlib.** Lua has none. `encode` compresses only when given a compressor
   (`opts.compress`, from bytes to zlib bytes), and a host never compresses
   what it sends (SPEC §3.3). The Decoder inflates `o=z` itself, with a
   small inflate in Lua, for a relay or a test that reads a program's output.
+
+## A field in cells
+
+`hotty.field(opts)` is SDK.md §4.6's Field: a text field's value and caret,
+edited as a host edits one on a surface, for a program that draws its
+fields in cells. With the same keymap on both sides, a field edits the same
+in cells and on a surface:
+
+```lua
+local km = hotty.resolve(false, hotty.TERMINAL_KEYS) -- and data-keys="…" on the surface's root
+local f = hotty.field({ value = "foo bar" }) -- opts: value, caret, multiline, password, rows
+for _, key in ipairs(hotty.decode_keys(input)) do
+	local action = key and km:lookup(key)
+	if action == hotty.INSERT then
+		f:type(key == "Space" and " " or key)
+	elseif action and action ~= "submit" then
+		f:do_action(action) -- true when the value changed
+	end
+end
+```
+
+**`do` is a keyword**, so the Field's Do is `do_action`; `f["do"]` is the
+same function.
 
 ## Neovim
 
@@ -216,7 +248,8 @@ hotty.plx is built on, as agreed with plexos.
 (gopher-lua v1.1.2, as plx embeds it, built with mise's Go):
 
 - the conformance vectors' SDK sections, `tests/vectors.lua`: wire, build,
-  encode, decode, scan and detect, every vector;
+  encode, decode, scan, detect, keys, keymap and edit, every vector but
+  the few that require `graphemes`;
 - the unit tests, `tests/unit.lua`: what the vectors leave out;
 - hotty.plx's tests, `tests/plx.lua`, against a fake plx-script (a `ctx`
   with the primitives, and `plx.after` on a clock the test turns), and the

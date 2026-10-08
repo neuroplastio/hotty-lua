@@ -596,6 +596,49 @@ test("detector: start returns the query with its n", function()
 	eq(d.deadline, 1500)
 end)
 
+-- keys, field -------------------------------------------------------------------
+
+test("decode_keys: input that is no key is false, so the list goes on", function()
+	local keys = hotty.decode_keys("\27[200~a\27[97;1:3u")
+	eq(#keys, 3)
+	eq(keys[1], false)
+	eq(keys[2], "a")
+	eq(keys[3], false)
+end)
+
+test("decode_keys: a byte that is not UTF-8 is no key", function()
+	local keys = hotty.decode_keys("\255b")
+	eq(#keys, 2)
+	eq(keys[1], false)
+	eq(keys[2], "b")
+end)
+
+test("parse_key: Shift makes a capital beyond ASCII", function()
+	eq(hotty.parse_key("Shift+\195\169"), "\195\137") -- é, É
+	eq(hotty.parse_key("Control+Shift+\208\182"), "Control+\208\150") -- ж, Ж
+end)
+
+test("keymap: TERMINAL_KEYS reads back as itself", function()
+	eq(hotty.parse_keymap(hotty.TERMINAL_KEYS):format(), hotty.TERMINAL_KEYS)
+end)
+
+test("field: do is do_action", function()
+	local f = hotty.field({ value = "foo bar" })
+	eq(f.caret, 7, "the caret starts at the end")
+	eq(f["do"](f, "delete-word-backward"), true)
+	eq(f.value, "foo ")
+	eq(f:do_action("line-start"), false)
+	eq(f.caret, 0)
+end)
+
+test("field: a long value", function()
+	local f = hotty.field({ value = string.rep("ab ", 3000) })
+	eq(f:do_action("delete-word-backward"), true)
+	eq(#f.value, 3 * 3000 - 3)
+	eq(f:type("x"), true)
+	eq(f.caret, 3 * 3000 - 2)
+end)
+
 for _, f in ipairs(failures) do
 	print("FAIL " .. f)
 end
