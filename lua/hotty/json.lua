@@ -336,6 +336,9 @@ local function utf8_len(s, i)
 end
 M.utf8_len = utf8_len
 
+-- The UTF-8 of a code point.
+M.utf8 = utf8
+
 local function encode_string(s)
 	local out, k, i, n = { '"' }, 1, 1, #s
 	while i <= n do

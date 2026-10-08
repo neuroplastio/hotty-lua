@@ -1266,4 +1266,24 @@ function Detector:finish(now)
 end
 Detector["end"] = Detector.finish
 
+-- Keys (SDK.md §3.10) ------------------------------------------------------------
+
+local keys = require("hotty.keys")
+
+M.keys = keys
+M.MODIFIERS = keys.MODIFIERS
+M.ACTIONS = keys.ACTIONS
+M.MULTILINE_ACTIONS = keys.MULTILINE_ACTIONS
+M.INSERT = keys.INSERT
+M.TERMINAL_KEYS = keys.TERMINAL_KEYS
+M.parse_key = keys.parse_key
+M.decode_keys = keys.decode_keys
+M.keymap = keys.keymap
+M.parse_keymap = keys.parse_keymap
+M.resolve = keys.resolve
+
+-- A field in cells (SDK.md §4.6) --------------------------------------------------
+
+M.field = require("hotty.field").new
+
 return M
