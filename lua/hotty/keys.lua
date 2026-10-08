@@ -607,10 +607,12 @@ function Keymap:lookup(key)
 	return nil
 end
 
---- A data-keys value's bindings, without those a host ignores.
+--- A data-keys value's bindings, without those a host ignores. They are
+--- split on ASCII white space only: space, tab, LF, FF and CR (SPEC §10.2),
+--- not %s, which also takes VT.
 function M.parse_keymap(value)
 	local m = M.keymap()
-	for b in gmatch(value or "", "%S+") do
+	for b in gmatch(value or "", "[^ \t\n\f\r]+") do
 		local i = find(b, "=[^=]*$")
 		if i then
 			local key, action = M.parse_key(sub(b, 1, i - 1)), sub(b, i + 1)

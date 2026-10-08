@@ -618,6 +618,19 @@ test("parse_key: Shift makes a capital beyond ASCII", function()
 	eq(hotty.parse_key("Control+Shift+\208\182"), "Control+\208\150") -- ж, Ж
 end)
 
+test("keymap: VT does not separate bindings", function()
+	eq(
+		hotty.parse_keymap("Control+a=line-start\vAlt+b=word-backward Alt+f=word-forward"):format(),
+		"Alt+f=word-forward"
+	)
+end)
+
+test("decode_keys: a modifier field below 2 is no modifier", function()
+	local keys = hotty.decode_keys("\27[3;0~\27[97;0u")
+	eq(keys[1], "Delete")
+	eq(keys[2], "a")
+end)
+
 test("keymap: TERMINAL_KEYS reads back as itself", function()
 	eq(hotty.parse_keymap(hotty.TERMINAL_KEYS):format(), hotty.TERMINAL_KEYS)
 end)
