@@ -56,7 +56,7 @@ an error.
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1 })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
-| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `INSERT` |
+| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:program(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `INSERT` |
 | messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
 
 Where Lua differs:

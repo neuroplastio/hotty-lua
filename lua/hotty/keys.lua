@@ -579,13 +579,9 @@ end
 
 local FOCUS = { Tab = true, ["Shift+Tab"] = true, Escape = true }
 
---- What the field does with a key: an action, INSERT for a character it
---- types, or nil when the key is not the field's.
-function Keymap:lookup(key)
-	local k = M.parse_key(key)
-	if not k or FOCUS[k] then
-		return nil
-	end
+-- The action bound to a canonical key, or, for a key with Shift that is
+-- not bound, to the key without Shift; and the key's modifiers and value.
+function Keymap:bound(k)
 	local mods, value = split_key(k)
 	local a = self.actions[k]
 	if not a and mods.Shift then
@@ -595,6 +591,17 @@ function Keymap:lookup(key)
 		end
 		a = self.actions[key_name(rest, value)]
 	end
+	return a, mods, value
+end
+
+--- What the field does with a key: an action, INSERT for a character it
+--- types, or nil when the key is not the field's.
+function Keymap:lookup(key)
+	local k = M.parse_key(key)
+	if not k or FOCUS[k] then
+		return nil
+	end
+	local a, mods, value = self:bound(k)
 	if a then
 		if a == "program" or (M.MULTILINE_ACTIONS[a] and not self.multiline) then
 			return nil
@@ -605,6 +612,18 @@ function Keymap:lookup(key)
 		return M.INSERT
 	end
 	return nil
+end
+
+--- Whether the keymap gives a key to the program (SDK.md §3.10): it binds
+--- the key to program, or, for a key with Shift it does not bind, the key
+--- without Shift. On an element that is not a text field, a host asks it of
+--- the element's keymap, parse_keymap of its data-keys values joined with a
+--- space, the root's first, with no default keymap; a key it gives reaches
+--- the program before the element or a scroll uses it (SPEC §10.2, keys for
+--- the program).
+function Keymap:program(key)
+	local k = M.parse_key(key)
+	return k ~= nil and self:bound(k) == "program"
 end
 
 --- A data-keys value's bindings, without those a host ignores. They are
