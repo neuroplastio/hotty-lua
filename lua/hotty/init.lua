@@ -665,7 +665,9 @@ function Event:fit_rows()
 	return r
 end
 
---- A drag's cell and the keys held: {c, r, keys}.
+--- A drag's cell and the keys held: {c, r, keys}, and its steps x and y
+--- for an element with data-steps (SPEC §9.1), each nil when the detail
+--- has none or one that is not a whole number; 0 is a step like any other.
 function Event:drag()
 	local k = self.kind
 	if k ~= M.EVENT_DRAG_START and k ~= M.EVENT_DRAG and k ~= M.EVENT_DRAG_END then
@@ -683,7 +685,8 @@ function Event:drag()
 			end
 		end
 	end
-	return { c = c, r = r, keys = out }
+	local x, y = self.detail.x, self.detail.y
+	return { c = c, r = r, keys = out, x = is_int(x) and x or nil, y = is_int(y) and y or nil }
 end
 
 --- A hover's cell, {c, r, out = false}, or {out = true} when the pointer
@@ -762,6 +765,7 @@ function M.caps(d)
 	end
 	c.passthrough = d.passthrough == true
 	c.scroll = d.scroll == true
+	c.steps = d.steps == true
 	c.host = str(d.host)
 	c.version = str(d.version)
 	return c

@@ -369,6 +369,7 @@ local function caps_view(c, want)
 		net = c.net,
 		passthrough = c.passthrough,
 		scroll = c.scroll,
+		steps = c.steps,
 		host = c.host,
 		version = c.version,
 		drags = c:drags(),
