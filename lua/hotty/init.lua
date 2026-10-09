@@ -281,9 +281,20 @@ local function command(pairs_, payload, default_q, opts)
 end
 
 --- Asks whether the terminal is a host: a=q with n (1 if nil), fenced by
---- DA1 (SPEC §4).
-function M.query(n)
-	return M.encode({ { "a", "q" }, { "n", int(n or 1) } }) .. ESC .. "[c"
+--- DA1 (SPEC §4). opts.late asks for a late answer (late=1): what stands
+--- between the program and the terminal may answer once there is a host.
+function M.query(n, opts)
+	local p = { { "a", "q" }, { "n", int(n or 1) } }
+	if opts and opts.late then
+		p[#p + 1] = { "late", "1" }
+	end
+	return M.encode(p) .. ESC .. "[c"
+end
+
+--- Withdraws a query that asked for a late answer (SPEC §4): a=q:q=2, a
+--- query that wants no answer and takes the held one's place. No fence.
+function M.withdraw_late()
+	return M.encode({ { "a", "q" }, { "q", int(M.NO_REPLY) } })
 end
 
 --- Sends a surface's document (SPEC §5.1). opts: n, q (default 1);
@@ -1169,7 +1180,9 @@ Detector.__index = Detector
 M.Detector = Detector
 
 --- A Detector decides whether the terminal is a host, with the time passed
---- in, in milliseconds. opts.n is the query's number (1).
+--- in, in milliseconds. opts.n is the query's number (1); opts.late asks for
+--- a late answer (SPEC §4), and the first reply to the query once the state
+--- is text makes the terminal a host after all.
 ---
 --- It exposes state (detecting, native or text), caps (the host's, when
 --- native), decided, done, and deadline: when to call tick next, or nil
@@ -1177,6 +1190,7 @@ M.Detector = Detector
 function M.detector(opts)
 	return setmetatable({
 		n = opts and opts.n or 1,
+		late = opts and opts.late or false,
 		state = M.DETECTING,
 		caps = nil,
 		decided = false,
@@ -1213,7 +1227,7 @@ end
 function Detector:start(now)
 	self.timeout = now + M.DETECT_TIMEOUT
 	self:update()
-	return M.query(self.n)
+	return M.query(self.n, { late = self.late })
 end
 
 --- The time is now.
@@ -1248,6 +1262,9 @@ function Detector:reply(r, now)
 			self.state, self.decided = M.NATIVE, true
 			self.caps = r:caps()
 			self.after = math.min(now + M.DETECT_AFTER_REPLY, self.timeout)
+		elseif self.state == M.TEXT and self.late then
+			-- A late answer: a host after all. Decided and done stay so.
+			self.state, self.caps = M.NATIVE, r:caps()
 		end
 	end
 	self:update()
@@ -1274,6 +1291,7 @@ M.keys = keys
 M.MODIFIERS = keys.MODIFIERS
 M.ACTIONS = keys.ACTIONS
 M.MULTILINE_ACTIONS = keys.MULTILINE_ACTIONS
+M.SCROLL_ACTIONS = keys.SCROLL_ACTIONS
 M.INSERT = keys.INSERT
 M.TERMINAL_KEYS = keys.TERMINAL_KEYS
 M.parse_key = keys.parse_key

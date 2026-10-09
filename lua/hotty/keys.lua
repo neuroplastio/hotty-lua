@@ -40,6 +40,16 @@ M.ACTIONS = {
 	"newline",
 	"submit",
 	"program",
+	"scroll-up",
+	"scroll-down",
+	"scroll-left",
+	"scroll-right",
+	"scroll-page-up",
+	"scroll-page-down",
+	"scroll-half-page-up",
+	"scroll-half-page-down",
+	"scroll-start",
+	"scroll-end",
 }
 local ACTION = {}
 for _, a in ipairs(M.ACTIONS) do
@@ -56,6 +66,15 @@ M.MULTILINE_ACTIONS = {
 	["input-end"] = true,
 	["newline"] = true,
 }
+
+-- The scroll actions (SPEC §10.2, scrolling keys), which a text field's
+-- keymap leaves out.
+M.SCROLL_ACTIONS = {}
+for _, a in ipairs(M.ACTIONS) do
+	if sub(a, 1, 7) == "scroll-" then
+		M.SCROLL_ACTIONS[a] = true
+	end
+end
 
 -- What lookup returns for a character the field types.
 M.INSERT = "insert"
@@ -626,25 +645,44 @@ function Keymap:program(key)
 	return k ~= nil and self:bound(k) == "program"
 end
 
---- A data-keys value's bindings, without those a host ignores. They are
---- split on ASCII white space only: space, tab, LF, FF and CR (SPEC §10.2),
---- not %s, which also takes VT.
-function M.parse_keymap(value)
-	local m = M.keymap()
+--- The scroll action the keymap binds a key to, with the same fallback
+--- without Shift as program, or nil (SDK.md §3.10). A host asks it of the
+--- keymap it asks program of, for a key the element does not use (SPEC
+--- §10.2, scrolling keys).
+function Keymap:scroll(key)
+	local k = M.parse_key(key)
+	local a = k and self:bound(k)
+	return M.SCROLL_ACTIONS[a] and a or nil
+end
+
+-- Calls fn(key, action) for each of a data-keys value's bindings, in order,
+-- without those a host ignores. They are split on ASCII white space only:
+-- space, tab, LF, FF and CR (SPEC §10.2), not %s, which also takes VT.
+local function each_binding(value, fn)
 	for b in gmatch(value or "", "[^ \t\n\f\r]+") do
 		local i = find(b, "=[^=]*$")
 		if i then
 			local key, action = M.parse_key(sub(b, 1, i - 1)), sub(b, i + 1)
 			if key and ACTION[action] and not FOCUS[key] then
-				m:bind(key, action)
+				fn(key, action)
 			end
 		end
 	end
+end
+
+--- A data-keys value's bindings, without those a host ignores.
+function M.parse_keymap(value)
+	local m = M.keymap()
+	each_binding(value, function(key, action)
+		m:bind(key, action)
+	end)
 	return m
 end
 
 --- A field's keymap: SPEC §10.2's default, then each data-keys value, the
---- root's first.
+--- root's first. A binding to a scroll action is left out where it stands,
+--- in its own value too: it neither acts nor overrides an earlier binding of
+--- its key.
 function M.resolve(multiline, ...)
 	local m = M.keymap(multiline)
 	m:bind("ArrowLeft", "char-backward")
@@ -658,8 +696,13 @@ function M.resolve(multiline, ...)
 	m:bind("PageUp", "page-up")
 	m:bind("PageDown", "page-down")
 	m:bind("Enter", multiline and "newline" or "submit")
+	local function bind(key, action)
+		if not M.SCROLL_ACTIONS[action] then
+			m:bind(key, action)
+		end
+	end
 	for i = 1, select("#", ...) do
-		m:update(M.parse_keymap(select(i, ...)))
+		each_binding(select(i, ...), bind)
 	end
 	return m
 end

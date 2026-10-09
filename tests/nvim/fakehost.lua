@@ -8,7 +8,10 @@
 --     display (ED 2 or 3) drops every placement, as hottyterm does;
 --   - the host (when native): the query, and every command, kept as surfaces
 --     and placements, with replies as SPEC §3.6 has them. It lays nothing
---     out: r=auto gets auto_rows.
+--     out: r=auto gets auto_rows;
+--   - not a host, a multiplexer's pane with no terminal attached: it holds a
+--     query that asks for a late answer (SPEC §4), until another query takes
+--     its place, and become_host answers it.
 --
 -- Strict: a malformed HOTTY message, or a HOTTY command other than the query
 -- sent to a terminal that is not a host, is recorded in problems.
@@ -37,6 +40,8 @@ function M.new(opts)
 		placements = {}, -- surface to { x, y, c, r, window, z, p, f, v, C }
 		log = {}, -- every HOTTY command, in order: { a, s, control, payload }
 		queries = 0,
+		held = nil, -- the n of a query held for a late answer
+		withdrawn = 0, -- queries that took a held one's place and wanted no answer
 		problems = {},
 	}, Host)
 end
@@ -76,10 +81,20 @@ function Host:command(m)
 	local c = m.control
 	local entry = { a = c.a, s = c.s, control = c, payload = m.payload }
 	if c.a == "q" then
-		self.queries = self.queries + 1
 		if not self.native then
+			-- Any query takes a held one's place (SPEC §4).
+			self.held = c.late == "1" and (c.n or "") or nil
+			if c.q == "2" then
+				self.withdrawn = self.withdrawn + 1
+				return ""
+			end
+			self.queries = self.queries + 1
 			return ""
 		end
+		if c.q == "2" then
+			return ""
+		end
+		self.queries = self.queries + 1
 		self.log[#self.log + 1] = entry
 		return reply({ { "a", "ok" }, { "n", c.n or "" }, { "re", "q" } }, self.caps)
 	end
@@ -208,6 +223,19 @@ end
 --- An event, as the host sends it.
 function Host:event(surface, kind, target, detail)
 	return hotty.encode({ { "a", "ev" }, { "s", surface }, { "e", kind }, { "t", target or "" } }, detail)
+end
+
+--- The terminal becomes a host, as one attaching to a multiplexer's pane
+--- does, and returns the late answer to the query it held, if any.
+function Host:become_host()
+	self.native = true
+	local n = self.held
+	self.held = nil
+	if not n then
+		return ""
+	end
+	self.log[#self.log + 1] = { a = "q", control = { a = "q", n = n, late = "1" } }
+	return reply({ { "a", "ok" }, { "n", n }, { "re", "q" } }, self.caps)
 end
 
 --- The host forgets every surface, as a full reset does.

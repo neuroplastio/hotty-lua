@@ -197,7 +197,9 @@ local function build(b)
 	local opts = { n = o.n, q = o.q, detached = o.detached, scroll = o.scroll }
 	local name = b.build
 	if name == "query" then
-		return hotty.query(a.n)
+		return hotty.query(a.n, { late = o.late })
+	elseif name == "withdraw_late" then
+		return hotty.withdraw_late()
 	elseif name == "doc" then
 		return hotty.doc(a.surface, a.html, opts)
 	elseif name == "place" then
@@ -543,7 +545,7 @@ end
 -- detect ----------------------------------------------------------------------
 
 local function run_detect(v)
-	local det = hotty.detector({ n = v.n or 1 })
+	local det = hotty.detector({ n = v.n or 1, late = v.late })
 	local dec = hotty.decoder()
 	for i, st in ipairs(v.steps) do
 		local at = st.at
@@ -623,13 +625,19 @@ local function run_keys(v)
 end
 
 local function run_keymap(v)
-	if v.program ~= nil then
+	if v.program ~= nil or v.scroll ~= nil then
 		-- An element's keymap outside a text field: no default keymap.
 		local m = hotty.parse_keymap(table.concat(v.keys, " "))
-		for key, want in pairs(v.program) do
+		for key, want in pairs(v.program or {}) do
 			local got = m:program(key)
 			if got ~= want then
 				return false, show(key) .. ": program " .. show(got) .. ", want " .. show(want)
+			end
+		end
+		for key, want in pairs(v.scroll or {}) do
+			local got = m:scroll(key)
+			if not equal(got, want) then
+				return false, show(key) .. ": scroll " .. show(got) .. ", want " .. show(want)
 			end
 		end
 		return true, ""

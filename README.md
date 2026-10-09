@@ -49,14 +49,14 @@ an error.
 | constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
-| commands (§3.4) | `query`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `sync` |
+| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `sync` |
 | reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL` |
 | Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover`, `keep_cursor` |
 | names (§3.5) | `valid_name(s)`, `surface_name(s)` |
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
-| Detector (§3.8) | `hotty.detector({ n = 1 })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
-| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:program(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `INSERT` |
+| Detector (§3.8) | `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
+| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:program(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `SCROLL_ACTIONS`, `INSERT` |
 | messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
 
 Where Lua differs:
@@ -120,6 +120,7 @@ local hotty, hn = require("hotty"), require("hotty.nvim")
 local session = hn.session({
 	prefix = "myplugin", -- surface names: myplugin-<name>
 	on_ready = function(mode, caps) end, -- "native", or "text": draw in cells
+	late = true, -- text may turn native later, as in a multiplexer's pane (SPEC §4)
 })
 
 session:surface("card", {

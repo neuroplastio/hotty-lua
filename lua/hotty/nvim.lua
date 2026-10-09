@@ -86,6 +86,7 @@ function M.term()
 			listeners = {}, -- functions(message), each told every message no wait claimed
 			sessions = {},
 			waiting = {}, -- callbacks for the decision
+			late = false, -- whether the query asks for a late answer (SPEC §4)
 		}, Term)
 		term_singleton:attach()
 	end
@@ -129,8 +130,26 @@ function Term:attach()
 			for _, s in ipairs(vim.list_slice(self.sessions)) do
 				s:close()
 			end
+			self:withdraw()
 		end,
 	})
+	-- While the editor is suspended, a shell reads the terminal: a late
+	-- answer must not reach it. On resume, detection runs again.
+	api.nvim_create_autocmd("VimSuspend", {
+		group = group,
+		callback = function()
+			self:withdraw()
+		end,
+	})
+end
+
+-- Withdraws a query that asked for a late answer and has had none (SDK.md
+-- §4.1), decided or not, so that no answer reaches whatever reads the
+-- terminal next.
+function Term:withdraw()
+	if self.late and self.detector and self.mode ~= hotty.NATIVE then
+		self:send(hotty.withdraw_late())
+	end
 end
 
 --- Writes commands to the terminal, in one write. Returns whether a
@@ -178,7 +197,7 @@ end
 function Term:start()
 	self.mode = hotty.DETECTING
 	self.caps = nil
-	self.detector = hotty.detector({ n = 1 })
+	self.detector = hotty.detector({ n = 1, late = self.late })
 	self:send(self.detector:start(now()))
 	self:arm()
 end
@@ -207,6 +226,13 @@ function Term:after_detector()
 		for _, cb in ipairs(waiting) do
 			cb(self.mode, self.caps)
 		end
+		for _, s in ipairs(self.sessions) do
+			s:decided(self.mode, self.caps)
+		end
+	elseif self.mode == hotty.TEXT and det.state == hotty.NATIVE then
+		-- A late answer (SPEC §4): a host attached after all, as to a
+		-- multiplexer's pane. Every session hears it, and lays out again.
+		self.mode, self.caps = det.state, det.caps
 		for _, s in ipairs(self.sessions) do
 			s:decided(self.mode, self.caps)
 		end
@@ -346,7 +372,12 @@ local ns = api.nvim_create_namespace("hotty")
 
 --- A plugin's surfaces. opts:
 ---   prefix      the start of every surface name: the plugin's (required)
----   on_ready    function(mode, caps): the mode is known ("native" or "text")
+---   on_ready    function(mode, caps): the mode is known ("native" or "text"),
+---               or, with late, changed from text to native
+---   late        ask for a late answer (SPEC §4): a terminal found not to be
+---               a host may become one later, as a multiplexer's pane does
+---               when a host attaches; the session then draws its surfaces.
+---               It is the terminal's: one session asking is enough
 ---   on_event    function(event, surface): what the user did, in any surface
 ---   on_error    function(err, surface): a command the host refused
 ---   max_surfaces  48 by default; the host's limits.surfaces when lower
@@ -371,6 +402,13 @@ function M.session(opts)
 	}, Session)
 	table.insert(term.sessions, s)
 	s:watch()
+	if opts.late and not term.late then
+		term.late = true
+		-- Detection that did not ask, done or under way, asks again.
+		if term.mode == hotty.TEXT or term.mode == hotty.DETECTING then
+			term.mode = nil
+		end
+	end
 	term:detect()
 	if term.mode == hotty.NATIVE or term.mode == hotty.TEXT then
 		vim.schedule(function()

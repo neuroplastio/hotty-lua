@@ -190,6 +190,56 @@ test("not a host: text after the DA1 and its grace, and nothing but the query se
 	return t
 end)
 
+test(
+	"late: not a host until one attaches; its late answer makes the session native, and the card is drawn",
+	function(spawn)
+		local t = spawn({ native = false })
+		t.lua(SETUP:gsub('prefix = "t",', 'prefix = "t", late = true,'))
+		wait(function()
+			return t.lua("return T.mode") == "text"
+		end, "text")
+		t.lua(CARD)
+		t.settle()
+		eq(t.host.held, "1", "the query held")
+		eq(t.host.placements["t-card"], nil)
+		t.send(t.host:become_host())
+		wait(function()
+			return t.lua("return T.mode") == "native"
+		end, "native, late")
+		wait(function()
+			return t.host.placements["t-card"] ~= nil
+		end, "the card's placement")
+		eq(t.lua("return T.term.caps.v"), "0.1")
+		eq(t.host.queries, 1)
+		eq(t.host.problems, {})
+		return t
+	end
+)
+
+test(
+	"late: a session that asks after detection settled on text asks again; leaving withdraws the query",
+	function(spawn)
+		local t = spawn({ native = false })
+		t.lua(SETUP)
+		wait(function()
+			return t.lua("return T.mode") == "text"
+		end, "text")
+		eq(t.host.held, nil, "nothing held without late")
+		t.lua([[T.late = require("hotty.nvim").session({ prefix = "l", late = true })]])
+		wait(function()
+			return t.host.held == "1"
+		end, "a query held for a late answer")
+		eq(t.host.queries, 2)
+		pcall(vim.rpcrequest, t.rpc, "nvim_command", "qa!")
+		wait(function()
+			return t.host.withdrawn == 1
+		end, "the query withdrawn")
+		eq(t.host.held, nil)
+		eq(t.host.problems, {})
+		return t
+	end
+)
+
 -- Placement -------------------------------------------------------------------
 
 test("a surface below a line: its document once, placed on the row after, room made", function(spawn)
