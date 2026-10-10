@@ -10,6 +10,8 @@ agreed on 2026-10-07 (plexos `vault/tasks/hotty-sdks.md`, HOTTY-LUA-01).
   a pinned copy of `lua/hotty/` (all but `nvim.lua`), embeds it, and
   preloads it into every script's state, so `require("hotty")` works with
   no `package.path`. `make hotty-lua REV=<sha>` in plexos refreshes the copy.
+  From HOTTY 0.2 the copy has `hotty.msgpack` and `hotty.utf8`, and no
+  `hotty.json`.
   The state is gopher-lua v1.1.2 with every standard library, no `bit`, and
   a registry raised for `table.concat` over many strings. `make check` here
   runs the conformance vectors and the unit tests under glua v1.1.2, the
@@ -26,12 +28,13 @@ agreed on 2026-10-07 (plexos `vault/tasks/hotty-sdks.md`, HOTTY-LUA-01).
 
 ## Native modules
 
-`init.lua` reaches base64 and zlib only through `require("hotty.base64")`
-and `require("hotty.inflate")`, when it loads. A host may put its own
-modules with the same functions in `package.preload` (or `package.loaded`)
-before the first `require("hotty")`; plx does, for base64, since gopher-lua
-runs the Lua one at a few MB/s. `tests/unit.lua` checks that `init.lua`
-uses what it is given, and pins the edges below.
+`init.lua` reaches base64, zlib and msgpack only through
+`require("hotty.base64")`, `require("hotty.inflate")` and
+`require("hotty.msgpack")`, when it loads. A host may put its own modules
+with the same functions in `package.preload` (or `package.loaded`) before
+the first `require("hotty")`; plx does, for base64, since gopher-lua runs
+the Lua one at a few MB/s, and may for msgpack. `tests/unit.lua` checks
+that `init.lua` uses what it is given, and pins the edges below.
 
 - `hotty.base64.encode(s)`: the base64 of `s`, standard alphabet, padded.
 - `hotty.base64.decode(s)`: the bytes, or nil. It removes every byte Lua's
@@ -44,10 +47,56 @@ uses what it is given, and pins the edges below.
   dictionary, a bad stream, an Adler-32 that does not match, or more than
   `MAX` bytes out (16 MiB; `init.lua` does not read it). Bytes after the
   checksum are ignored.
+- `hotty.msgpack.decode(s)`: the one msgpack value the bytes `s` hold (a
+  host's body, SPEC §3.3), and its floats: `value, floats`. Or `nil` and
+  an error, a string that starts with `msgpack: `, when `s` is not one
+  value (below).
+  - **The value** is plain Lua, with no metatables. A map is a table keyed
+    by its keys (a str or bin key is a string, an int or float key a
+    number, a bool key a boolean), and an array a table with its elements
+    at 1 to n. str and bin are strings, true and false booleans, and ints
+    and floats numbers (a float as IEEE 754 has it: -0, the infinities and
+    NaN too). Extension −1, a timestamp of 4, 8 or 12 bytes, is
+    `{ sec = n, nsec = n }`.
+  - **nil is absent**, and so is any other extension. A map's key whose
+    value is absent is left out, and a key given twice keeps its last value
+    (and its mark in `floats`). An array's absent element leaves a hole, so
+    an array has no length of its own: `#` of a table with a hole may be
+    any of its borders. A value that is absent as a whole decodes as `nil`
+    and an empty `floats`.
+  - **floats** is a table whose keys are the tables of the value:
+    `floats[t][k] == true` where `t[k]` was a msgpack float, of 32 or 64
+    bits. Lua 5.1, LuaJIT and gopher-lua have one number type, and this is
+    how typed reading tells `7.0` from `7`. Only a table that holds a float
+    is a key, and only its floats are marked; a float that is the whole
+    value has no table to be marked in.
+  - **Not one value**, which is `nil` and an error:
+    - bytes after the value, or bytes cut short (a length past the end
+      too), or `s` not a string;
+    - 0xc1, which no type starts with;
+    - nesting more than 32 levels deep, the outermost container being
+      level 1: 32 arrays one in another decode, 33 do not. It is told while
+      reading, so no input recurses deeper;
+    - an int further than 2^53 − 1 from 0 either way (−2^53 too), in any
+      of its forms, and a timestamp's seconds alike;
+    - a map key that cannot key a table: nil, an absent extension, NaN, a
+      map, an array or a timestamp;
+    - a str that is not UTF-8 (an overlong form, a surrogate, anything past
+      U+10FFFF), as msgpack defines a str and as the reference client reads
+      one; a bin is any bytes;
+    - a timestamp of another length, or with nanoseconds of a second or
+      more.
 
-`hotty.json` and `hotty.join` are not seams: decode marks its tables
-(`json.is_object`, `json.is_array`, `json.null`), and `hotty.caps` and
-`Event` read those marks.
+`init.lua` reads a body by the type SPEC §3.3 gives each field it knows: an
+int is a whole number that `floats` does not mark, a float one it marks. A
+table does not say whether it was a map or an array, so a map is read as a
+table whose keys are all strings, and an array as one whose keys are 1 to
+n. A host that writes a struct as an array then fails, as it should, but an
+empty array reads as an empty map and the other way round; a known field
+holding nil reads as left out; and a nil at an array's end goes unseen.
+SPEC §3.3 has a host send none of these.
+
+`hotty.join` and `hotty.utf8` are not seams.
 
 ## The primitives
 
@@ -56,11 +105,14 @@ and writes for the script, so the adapter needs no Scanner, no Detector and
 no fences. What plx-script gives it, as agreed:
 
 1. **The caps, whole.** `ctx:hotty()` keeps `{ v, host, scheme, dark }`
-   (nil for no host) and gains `raw`, the caps JSON as plx relays it. A
-   change of host, and only a change (never the start), calls
+   (nil for no host) and gains `raw`, the capabilities as the host sent
+   them: from HOTTY 0.2 the msgpack body of its reply to plx's query, the
+   bytes after base64 (0.1's was JSON; plexos MSGPACK-HOTTY). A change of
+   host, and only a change (never the start), calls
    `on_hotty_caps(ctx, raw)`, raw nil for none, before the `on_show` it
-   causes; it draws no frame itself. The adapter reads
-   `hotty.caps(hotty.json.decode(raw))` and sends its documents again.
+   causes; it draws no frame itself. The adapter reads `hotty.caps(raw)`
+   and sends its documents again. Capabilities that do not decode, or name
+   no version (`v`), are no host.
 2. **Sending.** `ctx:hotty_send(s)` writes HOTTY commands (the builders'
    strings) for the script's own surfaces to the instance's output, in
    order with plx's frames and never inside one. The relay prefixes the
@@ -141,4 +193,7 @@ a, b = a + 1, a
 print(b) -- 1 in Lua 5.1 and LuaJIT, 2 in gopher-lua v1.1.2
 ```
 
-The last two are bugs to report upstream, or to fix in a fork.
+- `math.huge` is the largest double, not infinity (`2 * math.huge` is),
+  and a product or quotient that is −0 comes out 0 (`-x` of 0 is −0).
+
+The last three are bugs to report upstream, or to fix in a fork.

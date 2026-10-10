@@ -17,13 +17,22 @@
 -- sent to a terminal that is not a host, is recorded in problems.
 
 local hotty = require("hotty")
+local mp = require("msgpack_writer")
 
 local M = {}
 local Host = {}
 Host.__index = Host
 
-local DEFAULT_CAPS = '{"v":"0.1","events":["click","change","input","submit","press","focus","blur","resize","fit","hover","drag"],'
-	.. '"cell":{"w":9,"h":18},"scale":1,"scheme":"dark","limits":{"surfaces":64},"host":"fake","version":"0.0.1"}'
+local DEFAULT_CAPS = mp.pack({
+	v = "0.2",
+	events = { "click", "change", "input", "submit", "press", "focus", "blur", "resize", "fit", "hover", "drag" },
+	cell = { w = 9, h = 18 },
+	scale = mp.float(1),
+	scheme = "dark",
+	limits = { surfaces = 64 },
+	host = "fake",
+	version = "0.0.1",
+})
 
 function M.new(opts)
 	opts = opts or {}
@@ -69,7 +78,7 @@ function Host:answer(m, err, extra)
 		if q >= 2 then
 			return ""
 		end
-		return reply(ctl, string.format('{"code":"%s","detail":"%s"}', err, m.control.s or ""))
+		return reply(ctl, mp.pack({ code = err, detail = m.control.s or "" }))
 	end
 	if q ~= 0 then
 		return ""
@@ -220,9 +229,10 @@ function Host:feed(data)
 	return table.concat(out)
 end
 
---- An event, as the host sends it.
+--- An event, as the host sends it; detail is a table, written as msgpack.
 function Host:event(surface, kind, target, detail)
-	return hotty.encode({ { "a", "ev" }, { "s", surface }, { "e", kind }, { "t", target or "" } }, detail)
+	local body = detail and mp.pack(detail) or nil
+	return hotty.encode({ { "a", "ev" }, { "s", surface }, { "e", kind }, { "t", target or "" } }, body)
 end
 
 --- The terminal becomes a host, as one attaching to a multiplexer's pane

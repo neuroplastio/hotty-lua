@@ -6,18 +6,18 @@
 --   <lua> tests/vectors.lua [vectors.json]
 --
 -- under luajit, lua5.1, nvim -l and glua (gopher-lua). It reads the vectors
--- with hotty.json; under nvim -l it first checks that reading against
--- vim.json's, so that the decoder under test is not the only judge of what
--- the vectors say.
+-- with tests/json.lua; under nvim -l it first checks that reading against
+-- vim.json's. A host's bodies are msgpack in the sequences, and the JSON
+-- that shows them (bodies, a detect step's body) is not read.
 
 local root = ((arg and arg[0]) or ""):match("^(.-)/?tests/[^/]*$") or "."
 if root == "" then
 	root = "."
 end
-package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. package.path
+package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. root .. "/tests/?.lua;" .. package.path
 
 local hotty = require("hotty")
-local json = hotty.json
+local json = require("json")
 local null = json.null
 
 -- What this SDK implements, for vectors marked "requires".
@@ -26,7 +26,6 @@ local FEATURES = {
 	["event.hover"] = true,
 	["caps.passthrough"] = true,
 	["caps.version"] = true,
-	["caps.lenient"] = true,
 	["caps.drag-kinds"] = true,
 	["options.unordered"] = true,
 	["doc.scroll"] = true,
@@ -432,7 +431,12 @@ local function run_decode(v)
 				return ok, why
 			end
 		end
-		if want.caps then
+		if want.caps == null then
+			local r = m:reply()
+			if r and r:caps() then
+				return false, "caps, where the reply carries none"
+			end
+		elseif want.caps then
 			local r = m:reply()
 			local c = r and r:caps()
 			if not c then
@@ -729,7 +733,7 @@ local function main()
 	print("runtime " .. runtime())
 	if vim and vim.json then
 		local ok, where = same_json(data, vim.json.decode(text), "vectors")
-		check("json", "hotty.json reads vectors.json as vim.json does", ok, "differs at " .. tostring(where))
+		check("json", "tests/json.lua reads vectors.json as vim.json does", ok, "differs at " .. tostring(where))
 	end
 	-- The copy, against the spec's, when a checkout is at hand (HOTTY_DIR).
 	local dir = os.getenv("HOTTY_DIR")

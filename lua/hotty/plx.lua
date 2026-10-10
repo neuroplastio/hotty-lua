@@ -19,8 +19,6 @@
 --- The wire layer is all it requires.
 local hotty = require("hotty")
 
-local json = hotty.json
-
 local M = {}
 
 M.REQUEST_TIMEOUT = 3000 -- ms: a numbered command's reply (SDK.md §4.1)
@@ -111,17 +109,16 @@ function Session:attach(ctx)
 	return self
 end
 
--- The host is now the one whose capabilities raw is, the JSON plx relays,
--- or none. Without ctx:hotty_send there is no way to reach one.
+-- The host is now the one whose capabilities raw is, the body of its reply
+-- to plx's query (msgpack, as the host sent it), or none: so is a host whose
+-- capabilities do not decode, or name no version. Without ctx:hotty_send
+-- there is no way to reach one.
 function Session:host(raw)
 	local caps
-	if type(raw) == "string" and type(self.ctx.hotty_send) == "function" then
-		local d = json.decode(raw)
-		if json.is_object(d) then
-			caps = hotty.caps(d)
-			if caps.v == "" then
-				caps = nil
-			end
+	if type(self.ctx.hotty_send) == "function" then
+		caps = hotty.caps(raw)
+		if caps and caps.v == "" then
+			caps = nil
 		end
 	end
 	self:forget()

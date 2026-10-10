@@ -6,12 +6,12 @@
 --- Characters are code points, CR LF one: Lua has no grapheme segmentation
 --- (SDK.md §4.6). Shift makes a capital of a letter in ASCII, Latin-1, and
 --- the basic Greek and Cyrillic alphabets.
-local json = require("hotty.json")
+local u8 = require("hotty.utf8")
 
 local byte, char, sub, find, gmatch = string.byte, string.char, string.sub, string.find, string.gmatch
 local floor = math.floor
 local concat = table.concat
-local utf8_len, utf8 = json.utf8_len, json.utf8
+local utf8_len, utf8 = u8.len, u8.char
 
 local M = {}
 

@@ -1,6 +1,7 @@
--- Tests of what the vectors leave out: base64, JSON and inflate on their own,
--- the Scanner's limit at its edge and under any split, names, Control,
--- errors. Runs under the same interpreters as tests/vectors.lua.
+-- Tests of what the vectors leave out: base64, msgpack and inflate on their
+-- own, reading bodies, the Scanner's limit at its edge and under any split,
+-- names, Control, errors. Runs under the same interpreters as
+-- tests/vectors.lua.
 
 local root = ((arg and arg[0]) or ""):match("^(.-)/?tests/[^/]*$") or "."
 if root == "" then
@@ -9,8 +10,9 @@ end
 package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. root .. "/tests/?.lua;" .. package.path
 
 local hotty = require("hotty")
-local base64, json = hotty.base64, hotty.json
+local base64, msgpack = hotty.base64, hotty.msgpack
 local inflate = require("hotty.inflate")
+local mp = require("msgpack_writer") -- what a host writes
 
 -- Counted in a table: in gopher-lua v1.1.2, once pcall catches an error, a
 -- closure no longer shares its caller's locals.
@@ -124,67 +126,327 @@ test("base64: a large payload, for gopher-lua's table.concat", function()
 	eq(base64.decode(b), s)
 end)
 
--- json ------------------------------------------------------------------------
+-- msgpack ---------------------------------------------------------------------
 
-test("json: values", function()
-	local v = assert(json.decode(' {"a": [1, -2.5e3, true, false, null, "x"], "b": {}, "c": [] } '))
-	eq(v.a[1], 1)
-	eq(v.a[2], -2500)
-	eq(v.a[3], true)
-	eq(v.a[4], false)
-	eq(v.a[5], json.null)
-	eq(v.a[6], "x")
-	ok(json.is_object(v.b) and json.is_array(v.c), "{} and [] told apart")
-	ok(json.is_array(v.a) and json.is_object(v))
-end)
+-- What a host's own hotty.msgpack must do too (docs/plx.md).
 
-test("json: strings and escapes", function()
-	eq(json.decode('"a\\"\\\\\\/\\b\\f\\n\\r\\t"'), 'a"\\/\b\f\n\r\t')
-	eq(json.decode('"\\u00e9\\u2014\\ud83d\\ude00"'), "é—😀")
-	eq(json.decode('"é raw"'), "é raw")
-	eq(json.decode('"\\ud83d"'), "\237\160\189", "a lone surrogate, as WTF-8")
-end)
+local function hex(h)
+	return (h:gsub("%s", ""):gsub("%x%x", function(x)
+		return string.char(tonumber(x, 16))
+	end))
+end
 
-test("json: malformed", function()
-	for _, s in ipairs({
-		"",
-		"{",
-		"[1,]",
-		'{"a"}',
-		'{"a":1,}',
-		"01",
-		"1.",
-		".5",
-		"-",
-		"1e",
-		"tru",
-		'"a\nb"',
-		'"\\x"',
-		"1 2",
-		"nul",
-		'{"a":1}x',
-	}) do
-		local v, err = json.decode(s)
-		ok(v == nil and err, "accepted " .. q(s))
+local function one(h, what)
+	local v, floats = msgpack.decode(hex(h))
+	ok(type(floats) == "table", (what or h) .. ": " .. tostring(floats))
+	return v, floats
+end
+
+local function fails(h, what)
+	local v, err = msgpack.decode(hex(h))
+	ok(v == nil and type(err) == "string" and err:sub(1, 9) == "msgpack: ", "accepted " .. (what or h))
+end
+
+local function count(t)
+	local n = 0
+	for _ in pairs(t) do
+		n = n + 1
 	end
-	local deep = string.rep("[", 200) .. string.rep("]", 200)
-	ok(json.decode(deep) == nil, "too deep")
+	return n
+end
+
+test("msgpack: every form of an int, within 2^53 - 1 of 0", function()
+	for _, c in ipairs({
+		{ "00", 0 },
+		{ "7f", 127 },
+		{ "e0", -32 },
+		{ "ff", -1 },
+		{ "cc ff", 255 },
+		{ "cd ffff", 65535 },
+		{ "ce ffffffff", 4294967295 },
+		{ "cf 001fffffffffffff", 2 ^ 53 - 1 },
+		{ "cf 0000000000000007", 7 },
+		{ "d0 80", -128 },
+		{ "d0 07", 7 },
+		{ "d1 8000", -32768 },
+		{ "d2 80000000", -2147483648 },
+		{ "d3 ffe0000000000001", -(2 ^ 53 - 1) },
+		{ "d3 ffffffffffffffff", -1 },
+		{ "d3 001fffffffffffff", 2 ^ 53 - 1 },
+	}) do
+		local v, floats = one(c[1])
+		eq(v, c[2], c[1])
+		eq(next(floats), nil, c[1] .. ": no floats")
+	end
+	fails("cf 0020000000000000", "2^53")
+	fails("cf ffffffffffffffff", "2^64 - 1")
+	fails("d3 ffe0000000000000", "-2^53")
+	fails("d3 8000000000000000", "-2^63")
+	fails("d3 0020000000000000", "2^53, signed")
 end)
 
-test("json: encode as Go's encoding/json", function()
-	eq(json.encode(3), "3")
-	eq(json.encode(-0.5), "-0.5")
-	eq(json.encode(1e21), "1e+21")
-	eq(json.encode(1e20), "100000000000000000000")
-	eq(json.encode(0.000001), "0.000001")
-	eq(json.encode(1e-7), "1e-7")
-	eq(json.encode(0.1), "0.1")
-	eq(json.encode(123456789.125), "123456789.125")
-	eq(json.encode(true), "true")
-	eq(json.encode(json.null), "null")
-	eq(json.encode('<a href="x">&\n\1é'), '"\\u003ca href=\\"x\\"\\u003e\\u0026\\n\\u0001é"')
-	eq(json.encode("bad \255 byte"), '"bad \\ufffd byte"')
-	eq(json.encode(json.decode('{"b":[1,"x",{}],"a":[]}')), '{"a":[],"b":[1,"x",{}]}')
+test("msgpack: floats of 32 and 64 bits", function()
+	eq(one("ca 3fc00000"), 1.5)
+	eq(one("cb 3ff8000000000000"), 1.5)
+	eq(one("cb 3fb999999999999a"), 0.1)
+	eq(one("ca 3dcccccd"), 0.10000000149011612, "float32's 0.1")
+	eq(one("cb 0000000000000001"), 2 ^ -1074, "the least subnormal")
+	eq(one("ca 00000001"), 2 ^ -149)
+	eq(one("cb 7fefffffffffffff"), 1.7976931348623157e308)
+	eq(one("cb 4000000000000000"), 2, "whole")
+	local z = one("cb 8000000000000000")
+	ok(z == 0 and 1 / z < 0, "-0")
+	ok(one("cb 7ff0000000000000") > 1.7976931348623157e308, "infinity")
+	ok(one("ca ff800000") < -1.7976931348623157e308, "-infinity")
+	local nan = one("cb 7ff8000000000000")
+	ok(nan ~= nan, "NaN")
+end)
+
+test("msgpack: nil, booleans, strings and bins in every form", function()
+	local v, floats = msgpack.decode(hex("c0"))
+	eq(v, nil, "nil")
+	eq(type(floats), "table", "nil decodes")
+	eq(one("c2"), false)
+	eq(one("c3"), true)
+	eq(one("a0"), "")
+	eq(one("a3 616263"), "abc")
+	eq(one("d9 03 616263"), "abc")
+	eq(one("da 0003 616263"), "abc")
+	eq(one("db 00000003 616263"), "abc")
+	eq(one("d9 20" .. string.rep("78", 32)), string.rep("x", 32))
+	eq(one("a2 c3a9"), "é")
+	eq(one("c4 03 616263"), "abc")
+	eq(one("c5 0002 ff00"), "\255\0", "a bin is any bytes")
+	eq(one("c6 00000000"), "")
+end)
+
+test("msgpack: arrays and maps in every form", function()
+	for _, h in ipairs({ "92 01 a1 61", "dc 0002 01 a1 61", "dd 00000002 01 a1 61" }) do
+		local v = one(h)
+		eq(count(v), 2, h)
+		eq(v[1], 1)
+		eq(v[2], "a")
+	end
+	for _, h in ipairs({ "81 a1 61 01", "de 0001 a1 61 01", "df 00000001 a1 61 01" }) do
+		local v = one(h)
+		eq(count(v), 1, h)
+		eq(v.a, 1)
+	end
+	eq(next((one("90"))), nil, "[]")
+	eq(next((one("80"))), nil, "{}")
+	local v = one("84 01 a1 61 c3 02 cb 3ff8000000000000 03 c4 01 62 04")
+	eq(v[1], "a", "an int key")
+	eq(v[true], 2, "a boolean key")
+	eq(v[1.5], 3, "a float key")
+	eq(v.b, 4, "a bin key is a string")
+	ok(getmetatable(v) == nil, "no metatable")
+	v = one("83 a1 61 c0 a1 62 01 a1 62 02")
+	eq(count(v), 1, "a nil value leaves its key out")
+	eq(v.b, 2, "a key twice: the last value")
+end)
+
+test("msgpack: an array keeps no length of its own", function()
+	local v = one("93 01 c0 03")
+	eq(v[1], 1)
+	eq(v[2], nil, "a hole")
+	eq(v[3], 3)
+	eq(next((one("92 c0 c0"))), nil, "nothing but nil")
+end)
+
+test("msgpack: a timestamp in 4, 8 or 12 bytes; any other extension is absent", function()
+	local function ts(h, sec, nsec)
+		local v = one(h)
+		eq(v.sec, sec, h)
+		eq(v.nsec, nsec, h)
+		ok(getmetatable(v) == nil and count(v) == 2, "only sec and nsec")
+	end
+	ts("d6 ff 00000001", 1, 0)
+	ts("c7 04 ff 00000001", 1, 0)
+	ts("d7 ff 00000004 00000002", 2, 1)
+	ts("d7 ff ee6b27ff 00000003", 3 * 2 ^ 32 + 3, 999999999)
+	ts("c7 0c ff 00000003 ffffffffffffffff", -1, 3)
+	ts("c7 0c ff 3b9ac9ff 001fffffffffffff", 2 ^ 53 - 1, 999999999)
+	fails("c7 03 ff 000000", "a timestamp of 3 bytes")
+	fails("d8 ff 00000000000000000000000000000000", "a timestamp of 16 bytes")
+	fails("d7 ff ee6b2800 00000000", "a second of nanoseconds")
+	fails("c7 0c ff 00000000 0020000000000000", "seconds past 2^53 - 1")
+	for _, h in ipairs({
+		"d4 01 00",
+		"d5 01 0000",
+		"d6 01 00000000",
+		"d7 01 0000000000000000",
+		"d8 01 00000000000000000000000000000000",
+		"c7 00 05",
+		"c8 0001 05 00",
+		"c9 00000001 05 00",
+		"d6 fe 00000000",
+	}) do
+		eq(one(h), nil, h)
+		local v = one("82 a1 61 " .. h .. " a1 62 01")
+		eq(count(v), 1, h .. " in a map")
+		eq(v.b, 1)
+	end
+end)
+
+test("msgpack: floats marks the floats of each table", function()
+	-- {"a": 1.0, "b": 1, "c": [2.0, 2], "d": {"e": float32 3.5}, "f": {"g": 1}}
+	local v, floats = one(
+		"85 a1 61 cb 3ff0000000000000 a1 62 01 a1 63 92 cb 4000000000000000 02"
+			.. " a1 64 81 a1 65 ca 40600000 a1 66 81 a1 67 01"
+	)
+	eq(v.a, 1)
+	eq(v.b, 1, "1.0 and 1 are one number in Lua")
+	eq(floats[v].a, true)
+	eq(floats[v].b, nil)
+	eq(floats[v.c][1], true)
+	eq(floats[v.c][2], nil)
+	eq(floats[v.d].e, true, "a float of 32 bits")
+	eq(floats[v.f], nil, "only tables holding a float")
+	eq(count(floats), 3)
+	v, floats = one("82 a1 61 cb 3ff0000000000000 a1 61 01")
+	eq(next(floats), nil, "a float a key's last value replaced")
+	v, floats = one("82 a1 61 01 a1 61 cb 3ff0000000000000")
+	eq(floats[v].a, true)
+	v, floats = one("cb 3ff0000000000000")
+	eq(next(floats), nil, "a float alone has no table to mark")
+end)
+
+test("msgpack: what is not one value", function()
+	for _, h in ipairs({
+		"",
+		"01 02",
+		"81 a1 61 01 c0",
+		"cd 00",
+		"a3 6162",
+		"d9",
+		"92 01",
+		"81 a1 61",
+		"cb 3ff00000",
+		"d6 ff 0000",
+		"c4 05 61",
+		"dd ffffffff",
+		"df ffffffff",
+		"db ffffffff",
+		"c9 ffffffff 01",
+	}) do
+		fails(h)
+	end
+	fails("c1", "0xc1, which no type starts with")
+	local v, err = msgpack.decode(nil)
+	ok(v == nil and err:sub(1, 9) == "msgpack: ", "not a string")
+end)
+
+test("msgpack: a map key that cannot key a table", function()
+	fails("81 c0 01", "nil")
+	fails("81 cb 7ff8000000000000 01", "NaN")
+	fails("81 90 01", "an array")
+	fails("81 80 01", "a map")
+	fails("81 d6ff00000000 01", "a timestamp")
+	fails("81 d4 01 00 01", "an extension, which is absent")
+end)
+
+test("msgpack: a str is UTF-8, a bin any bytes", function()
+	fails("a1 ff")
+	fails("a2 c328", "a sequence cut short")
+	fails("a2 c080", "an overlong form")
+	fails("a3 eda080", "a surrogate")
+	fails("a4 f4908080", "past U+10FFFF")
+	fails("81 a1 ff 01", "a key")
+	eq(one("a4 f09f9880"), "😀")
+	eq(one("c4 01 ff"), "\255")
+end)
+
+test("msgpack: 32 levels deep, the outermost the first", function()
+	local deep = string.rep("91 ", 31) .. "90"
+	local v = one(deep, "32 arrays")
+	for _ = 1, 31 do
+		v = v[1]
+	end
+	eq(next(v), nil, "the 32nd")
+	fails("91 " .. deep, "33 arrays")
+	one(string.rep("81 a1 61 ", 31) .. "80", "32 maps")
+	fails(string.rep("81 a1 61 ", 32) .. "80", "33 maps")
+	fails(string.rep("91 ", 5000) .. "90", "5000 arrays")
+	one(string.rep("81 a1 61 ", 31) .. "01", "31 maps and an int")
+end)
+
+-- messages ----------------------------------------------------------------------
+
+local function ev(kind, body)
+	local _, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" }, { "s", "f" }, { "e", kind } }, body))
+	return m:event()
+end
+
+local function caps(body)
+	local _, m = hotty.decoder():feed(hotty.encode({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, body))
+	return m:reply():caps()
+end
+
+test("messages: the body, decoded once, or nil and why", function()
+	local _, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, mp.pack({ w = mp.float(2) })))
+	local v, floats = m:body()
+	eq(v.w, 2)
+	eq(floats[v].w, true)
+	eq(m:body(), v, "the same table")
+	_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, "\1\2"))
+	local none, err = m:body()
+	eq(none, nil)
+	eq(type(err), "string")
+	_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, "\1"))
+	none, err = m:body()
+	eq(none, nil, "a body is a map")
+	eq(type(err), "string")
+	_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }))
+	eq(m:body(), nil, "none")
+end)
+
+test("area: four ints, in a map; another kind's detail is not read", function()
+	eq(ev("click", mp.pack({ area = { c = 0, r = 1, w = 2, h = 3 } })):area().h, 3)
+	eq(ev("click", mp.pack({ area = { c = 0, r = 1, w = 2 } })):area(), nil)
+	local e = ev("click", mp.pack({ value = "v", area = { c = 0, r = 1, w = "2", h = 3 } }))
+	eq(e:area(), nil, "a str for an int")
+	eq(e:value(), nil, "and so nothing the detail carries")
+	eq(ev("click", mp.pack({ area = { 0, 1, 2, 3 } })):area(), nil, "an array for a map")
+	eq(ev("click", ""):area(), nil)
+	eq(ev("submit", mp.pack({ value = "v" })):value(), nil, "a form's field named value")
+	eq(ev("submit", mp.pack({ value = "v" })):fields().value, "v")
+	eq(ev("submit", ""):fields(), nil, "no detail")
+	eq(ev("resize", mp.pack({ w = 320, h = 48 })):size(), nil, "ints for floats")
+	eq(ev("zoom", mp.pack({ value = "v" })):value(), nil, "a kind the SDK does not know")
+	eq(next(ev("zoom", mp.pack({ value = "v" })).detail), nil)
+end)
+
+-- A Lua table does not say whether it was an array or a map, and holds no
+-- nil: where typed reading cannot tell (docs/plx.md).
+test("typed reading: what a table cannot tell", function()
+	local c = caps(hex("82 a1 76 a3 302e32 a3 6f7073 80"))
+	ok(c and #c.ops == 0, "an empty map for an array")
+	eq(caps(hex("82 a1 76 a3 302e32 a6 6c696d697473 90")).v, "0.2", "an empty array for a map")
+	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 81 01 a1 61")).ops[1], "a", "a map keyed 1 to n for an array")
+	eq(ev("click", mp.pack({ value = mp.NIL, href = "#x" })):link(), "#x", "nil in a known field: absent")
+	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 92 a1 61 c0")).ops[1], "a", "nil at an array's end")
+	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 93 a1 61 c0 a1 62")), nil, "nil inside an array")
+	eq(caps(hex("82 a1 76 a3 302e32 a4 63656c6c 92 09 12")), nil, "a non-empty array for a map")
+	eq(caps(hex("82 a1 76 a3 302e32 01 02")), nil, "a key that is not a str where fields are read")
+	eq(caps(hex("92 a1 76 a3 302e32")), nil, "an array for the body")
+end)
+
+test("caps: from a body's bytes, as plx relays them; scroll is a bool", function()
+	local c = hotty.caps(mp.pack({ v = "0.2", scale = mp.float(2), cell = { w = 18, h = 36 }, future = { 1, mp.NIL } }))
+	eq(c.v, "0.2")
+	eq(c.scale, 2)
+	local w = c:cell_css()
+	eq(w, 9)
+	eq(c.raw.future[1], 1, "raw has the fields the SDK does not know")
+	eq(hotty.caps(""), nil)
+	eq(hotty.caps(nil), nil)
+	eq(hotty.caps("\1"), nil, "not a map")
+	eq(hotty.caps(mp.pack({ v = "0.2", scale = 2 })), nil, "an int for a float")
+	ok(hotty.caps(mp.pack({ v = "0.2", scroll = true })).scroll)
+	eq(hotty.caps(mp.pack({ v = "0.2", scroll = "yes" })), nil)
+	eq(hotty.caps(mp.pack({ v = "0.2", scroll = 1 })), nil)
+	eq(hotty.caps(mp.pack({ v = "0.2" })).scroll, false)
+	eq(caps(""), nil, "an ok reply to q with no body")
 end)
 
 -- inflate ---------------------------------------------------------------------
@@ -277,11 +539,15 @@ end)
 
 -- seams -----------------------------------------------------------------------
 
--- A host may preload its own hotty.base64 and hotty.inflate (docs/plx.md):
--- init.lua reaches them only through require.
-test("seams: init.lua uses the hotty.base64 and hotty.inflate it is given", function()
-	local calls = { encode = 0, decode = 0, zlib = 0 }
-	local saved = { package.loaded["hotty"], package.loaded["hotty.base64"], package.loaded["hotty.inflate"] }
+-- A host may preload its own hotty.base64, hotty.inflate and hotty.msgpack
+-- (docs/plx.md): init.lua reaches them only through require.
+test("seams: init.lua uses the hotty.base64, hotty.inflate and hotty.msgpack it is given", function()
+	local calls = { encode = 0, decode = 0, zlib = 0, msgpack = 0 }
+	local names = { "hotty", "hotty.base64", "hotty.inflate", "hotty.msgpack" }
+	local saved = {}
+	for i, name in ipairs(names) do
+		saved[i] = package.loaded[name]
+	end
 	package.loaded["hotty.base64"] = {
 		encode = function(s)
 			calls.encode = calls.encode + 1
@@ -298,20 +564,35 @@ test("seams: init.lua uses the hotty.base64 and hotty.inflate it is given", func
 			return inflate.zlib(s)
 		end,
 	}
+	-- Its answer whatever the bytes: a body that is no msgpack reads.
+	local given = {
+		decode = function()
+			calls.msgpack = calls.msgpack + 1
+			return { v = "given", cell = { w = 7, h = 7 } }, {}
+		end,
+	}
+	package.loaded["hotty.msgpack"] = given
 	package.loaded["hotty"] = nil
 	local loaded, fresh = pcall(require, "hotty")
-	package.loaded["hotty"], package.loaded["hotty.base64"], package.loaded["hotty.inflate"] =
-		saved[1], saved[2], saved[3]
+	for i, name in ipairs(names) do
+		package.loaded[name] = saved[i]
+	end
 	ok(loaded, tostring(fresh))
 	eq(fresh.doc("x", "<p>hi</p>"), hotty.doc("x", "<p>hi</p>"))
 	eq(calls.encode, 1, "encode")
-	local r, m = fresh.decoder():feed("\27]7279;a=ev:s=x:e=click;" .. base64.encode("{}") .. "\27\\")
+	local r, m = fresh.decoder():feed("\27]7279;a=ev:s=x:e=click;" .. base64.encode("\128") .. "\27\\")
 	eq(r, hotty.COMPLETE)
-	eq(m.payload, "{}")
+	eq(m.payload, "\128")
 	eq(calls.decode, 1, "decode")
 	r, m = fresh.decoder():feed("\27]7279;a=doc:s=x:o=z;" .. base64.encode(stored("<p>hi</p>")) .. "\27\\")
 	eq(m.payload, "<p>hi</p>")
 	eq(calls.zlib, 1, "zlib")
+	r, m = fresh.decoder():feed(fresh.encode({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, "not msgpack"))
+	eq(m:reply():caps().v, "given")
+	eq(calls.msgpack, 1, "msgpack")
+	eq(fresh.caps("not msgpack").cell.w, 7)
+	eq(calls.msgpack, 2)
+	eq(fresh.msgpack, given)
 end)
 
 -- encode ----------------------------------------------------------------------
@@ -407,23 +688,6 @@ test("doc's scroll: the axes as given; nil and 0 send no key", function()
 	eq(control().scroll, nil)
 end)
 
-test("area: four whole numbers, in an object; caps.scroll: true only", function()
-	local function area(detail)
-		local _, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" }, { "s", "f" }, { "e", "click" } }, detail))
-		return m:event():area()
-	end
-	eq(area('{"area":{"c":0,"r":1,"w":2,"h":3}}').h, 3)
-	eq(area('{"area":{"c":0,"r":1,"w":2,"h":1.5}}'), nil)
-	eq(area('{"area":{"c":0,"r":1,"w":2}}'), nil)
-	eq(area('{"area":{"c":0,"r":1,"w":"2","h":3}}'), nil)
-	eq(area('{"area":[0,1,2,3]}'), nil)
-	eq(area('{"area":null}'), nil)
-	eq(area(""), nil)
-	ok(hotty.caps({ scroll = true }).scroll)
-	eq(hotty.caps({ scroll = "yes" }).scroll, false)
-	eq(hotty.caps({ scroll = 1 }).scroll, false)
-end)
-
 test("sync takes commands as arguments or a list", function()
 	local a, b = hotty.set_text("x", "a", "1"), hotty.set_text("x", "b", "2")
 	eq(hotty.sync(a, b), hotty.sync({ a, b }))
@@ -458,8 +722,12 @@ test("control: ordered, set in place", function()
 end)
 
 test("errors: a reply's error names its code and detail", function()
-	local _, m =
-		hotty.decoder():feed("\27]7279;a=err:s=x:re=delta;" .. base64.encode('{"code":"ENOTARGET","detail":"go"}'))
+	local _, m = hotty.decoder():feed(
+		hotty.encode(
+			{ { "a", "err" }, { "s", "x" }, { "re", "delta" } },
+			mp.pack({ code = "ENOTARGET", detail = "go" })
+		)
+	)
 	local e = m:reply():err()
 	eq(e.code, "ENOTARGET")
 	eq(e.detail, "go")
@@ -468,13 +736,16 @@ test("errors: a reply's error names its code and detail", function()
 	eq(okm:reply():err(), nil)
 end)
 
-test("messages: an err with a body that is not JSON has no code", function()
-	local _, m = hotty.decoder():feed("\27]7279;a=err:re=doc;" .. base64.encode("oops"))
-	local r = m:reply()
-	eq(r.ok, false)
-	eq(r.code, nil)
-	eq(r:err().code, "")
-	eq(m:event(), nil)
+test("messages: an err with a body that does not decode has no code", function()
+	for _, body in ipairs({ "oops", mp.pack({ code = 22 }), mp.pack({ code = "EINVAL", detail = mp.NIL }) .. "\0" }) do
+		local _, m = hotty.decoder():feed(hotty.encode({ { "a", "err" }, { "re", "doc" } }, body))
+		local r = m:reply()
+		eq(r.ok, false)
+		eq(r.code, nil)
+		eq(r.detail, nil)
+		eq(r:err().code, "")
+		eq(m:event(), nil)
+	end
 end)
 
 -- scanner ---------------------------------------------------------------------

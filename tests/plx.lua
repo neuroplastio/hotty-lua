@@ -6,10 +6,11 @@ local root = ((arg and arg[0]) or ""):match("^(.-)/?tests/[^/]*$") or "."
 if root == "" then
 	root = "."
 end
-package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. package.path
+package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. root .. "/tests/?.lua;" .. package.path
 
 local hotty = require("hotty")
 local hplx = require("hotty.plx")
+local mp = require("msgpack_writer") -- what a host writes
 
 -- Counted in a table: in gopher-lua v1.1.2, once pcall catches an error, a
 -- closure no longer shares its caller's locals.
@@ -45,8 +46,22 @@ end
 
 -- The fake ---------------------------------------------------------------------
 
-local CAPS = '{"v":"0.1","events":["click","fit"],"cell":{"w":9,"h":18},"scheme":"dark",'
-	.. '"limits":{"surfaces":64},"host":"fake","version":"0.0.1","future":{"x":[]}}'
+-- The host's capabilities as plx hands them over: the body of its reply to
+-- plx's query, msgpack.
+local function caps(surfaces)
+	return mp.pack({
+		v = "0.2",
+		events = { "click", "fit" },
+		cell = { w = 9, h = 18 },
+		scheme = "dark",
+		limits = { surfaces = surfaces },
+		host = "fake",
+		version = "0.0.1",
+		future = { x = mp.array({}) },
+	})
+end
+
+local CAPS = caps(64)
 
 -- plx's after and now, on a clock that moves only when the test says.
 local function new_plx()
@@ -82,7 +97,7 @@ local function new_ctx(raw, cols, rows)
 		if not self.raw then
 			return nil
 		end
-		return { v = "0.1", host = "fake", scheme = "dark", dark = true, raw = self.raw }
+		return { v = "0.2", host = "fake", scheme = "dark", dark = true, raw = self.raw }
 	end
 	function ctx:hotty_send(s)
 		if not self.raw then
@@ -131,7 +146,7 @@ local function event(s, kind, target, detail)
 end
 
 local function err(re, s, code)
-	return hotty.encode({ { "a", "err" }, { "re", re }, { "s", s } }, '{"code":"' .. code .. '","detail":"x"}')
+	return hotty.encode({ { "a", "err" }, { "re", re }, { "s", s } }, mp.pack({ code = code, detail = "x" }))
 end
 
 local function card(spec)
@@ -179,6 +194,20 @@ test("no host: text, and nothing sent", function()
 	local sf = s:surface("card", card())
 	eq(sf:set_text("n", "1"), false)
 	eq(#sent(ctx), 0)
+end)
+
+test("capabilities that do not decode, or name no version: text", function()
+	for _, raw in ipairs({
+		"",
+		'{"v":"0.2"}', -- JSON, as plx relayed 0.1's
+		mp.pack({ v = "0.2", scale = 2 }), -- an int for a float
+		mp.pack({ host = "fake" }),
+		mp.pack({ v = "" }),
+	}) do
+		local s = setup({ raw = raw })
+		eq(s.mode, hotty.TEXT, raw)
+		eq(s.caps, nil)
+	end
 end)
 
 test("without ctx:hotty_send: text", function()
@@ -277,12 +306,12 @@ test("events: the SDK's Event, to the surface and the session", function()
 		})
 	)
 	sent(ctx)
-	eq(s:hotty(ctx, event("card", "click", "b", '{"value":"v","area":{"c":1,"r":2,"w":3,"h":1}}')), true)
+	eq(s:hotty(ctx, event("card", "click", "b", mp.pack({ value = "v", area = { c = 1, r = 2, w = 3, h = 1 } }))), true)
 	eq(got.value, "v")
 	eq(got.area.w, 3)
 	eq(got.session, "click card")
 	got.session = nil
-	eq(s:hotty(ctx, event("other", "click", "b", "{}")), false, "a ui.hotty's")
+	eq(s:hotty(ctx, event("other", "click", "b", mp.pack({}))), false, "a ui.hotty's")
 	eq(got.session, nil)
 end)
 
@@ -316,7 +345,7 @@ test("a new host: every document again; none: text", function()
 	})
 	s:surface("card", card())
 	sent(ctx)
-	s:hotty_caps(ctx, CAPS:gsub('"surfaces":64', '"surfaces":8'))
+	s:hotty_caps(ctx, caps(8))
 	eq(actions(sent(ctx)), "doc card, place card")
 	eq(s.limit, 8)
 	ctx.raw = nil
@@ -369,7 +398,7 @@ test("requests: a numbered delta's ok, and a resource's by n alone", function()
 		got.res = r
 	end)
 	eq(m, n + 1)
-	s:hotty(ctx, hotty.encode({ { "a", "err" }, { "re", "res" }, { "n", tostring(m) } }, '{"code":"EBUDGET"}'))
+	s:hotty(ctx, hotty.encode({ { "a", "err" }, { "re", "res" }, { "n", tostring(m) } }, mp.pack({ code = "EBUDGET" })))
 	eq(got.res.ok, false)
 	eq(got.res:err().code, "EBUDGET")
 	eq(next(s.requests), nil)
@@ -415,7 +444,7 @@ test("a fit event changes the rows", function()
 	local s, ctx = setup()
 	s:surface("card", card({ rows = false, fit = true }))
 	sent(ctx)
-	s:hotty(ctx, event("card", "fit", "", '{"r":6}'))
+	s:hotty(ctx, event("card", "fit", "", mp.pack({ r = 6 })))
 	local cmds = sent(ctx)
 	eq(actions(cmds), "place card")
 	eq(cmds[1].control.r, "6")
@@ -423,7 +452,7 @@ test("a fit event changes the rows", function()
 end)
 
 test("limits.surfaces: no room, until one goes out of view", function()
-	local s, ctx = setup({ raw = CAPS:gsub('"surfaces":64', '"surfaces":1') })
+	local s, ctx = setup({ raw = caps(1) })
 	local a = s:surface("a", card())
 	local b = s:surface("b", card({ y = 9 }))
 	eq(actions(sent(ctx)), "doc a, place a")
@@ -443,7 +472,7 @@ test("bind: the tool's callbacks, and the ones it had", function()
 	local p, ctx = new_plx(), new_ctx(CAPS, 20, 10)
 	local s = hplx.session(tool, { plx = p })
 	ok(tool.on_hotty_caps and tool.on_resize, "bound")
-	local seq = event("card", "click", "b", "{}")
+	local seq = event("card", "click", "b", mp.pack({}))
 	tool.on_hotty(ctx, seq)
 	eq(had.seq, seq)
 	eq(s.ctx, ctx, "attached by the callback")
@@ -527,7 +556,7 @@ test("examples/plx/click.lua: the surface, a click and its delta", function()
 	eq(actions(cmds), "doc card, place card")
 	eq(cmds[2].control.c, "32")
 	ok(cmds[1].payload:find("no clicks yet", 1, true), "the document")
-	t.on_hotty(ctx, event("card", "click", "go", "{}"))
+	t.on_hotty(ctx, event("card", "click", "go", mp.pack({})))
 	cmds = sent(ctx)
 	eq(actions(cmds), "delta card")
 	eq(cmds[1].payload, "1 click")

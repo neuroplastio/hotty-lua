@@ -9,8 +9,9 @@
 --- Names are SDK.md's canonical ones in snake case (Appendix A). Options are a
 --- table, absence is nil, and an error is nil plus an error value.
 local base64 = require("hotty.base64")
-local json = require("hotty.json")
+local msgpack = require("hotty.msgpack")
 local inflate = require("hotty.inflate")
+local utf8 = require("hotty.utf8")
 
 local byte, char, sub, find, format, rep = string.byte, string.char, string.sub, string.find, string.format, string.rep
 local floor = math.floor
@@ -20,7 +21,7 @@ local join = require("hotty.join")
 local M = {}
 
 M.base64 = base64
-M.json = json
+M.msgpack = msgpack
 
 -- Constants (SDK.md §3.1) -----------------------------------------------------
 
@@ -28,7 +29,7 @@ M.NUMBER = "7279" -- the OSC number
 M.CHUNK = 4096 -- the most base64 bytes in one sequence
 M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
-M.VERSION = "0.1" -- the protocol version this SDK implements
+M.VERSION = "0.2" -- the protocol version this SDK implements
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
 M.SCAN_MAX = 65536 -- the longest HOTTY sequence a Scanner takes
 
@@ -106,7 +107,7 @@ local PREFIX = HEAD .. ";" -- what begins every HOTTY sequence
 
 -- Values and names (SDK.md §3.3, §3.5) -----------------------------------------
 
-local utf8_len = json.utf8_len
+local utf8_len = utf8.len
 
 --- v as a control value may be sent: each character a value may not hold
 --- (":", ";", "=", a control character, anything outside ASCII) becomes one
@@ -478,23 +479,11 @@ end
 
 -- Messages (SDK.md §3.9) --------------------------------------------------------
 
-local function is_num(v)
-	return type(v) == "number" and v == v
-end
-
-local function is_int(v)
-	return is_num(v) and v == floor(v) and v > -math.huge and v < math.huge
-end
-
 local function to_int(s)
 	if type(s) == "string" and find(s, "^%-?%d+$") then
 		return tonumber(s)
 	end
 	return nil
-end
-
-local function str(v)
-	return type(v) == "string" and v or nil
 end
 
 local Error = {}
@@ -517,6 +506,106 @@ function M.error(code, detail, re, surface)
 	return setmetatable({ code = code, detail = detail, re = re, surface = surface }, Error)
 end
 
+-- The types of a body's fields (SPEC §3.3): a type's name; a list of one
+-- type, an array of it; or a table of fields by name, or with "*" the type
+-- of each value of a map keyed by strings. A field not named is not
+-- checked, as one the SDK does not know is ignored (SDK.md §2.7).
+local AREA = { c = "int", r = "int", w = "int", h = "int" }
+local DRAG = { c = "int", r = "int", keys = { "str" }, x = "int", y = "int" }
+local ERROR = { code = "str", detail = "str" }
+local CAPS = {
+	v = "str",
+	ops = { "str" },
+	events = { "str" },
+	cell = { w = "int", h = "int" },
+	scale = "float",
+	scheme = "str",
+	limits = { ["*"] = "int" },
+	net = { ["*"] = { "str" } },
+	passthrough = "bool",
+	scroll = "bool",
+	steps = "bool",
+	host = "str",
+	version = "str",
+}
+-- Each kind's detail (SPEC §9); a kind not here carries none the SDK reads.
+local DETAIL = {
+	click = { value = "str", href = "str", url = "str", area = AREA },
+	press = { area = AREA },
+	change = { checked = "bool", value = "str" },
+	input = { value = "str" },
+	submit = { ["*"] = "str" },
+	resize = { w = "float", h = "float" },
+	fit = { r = "int" },
+	dragstart = DRAG,
+	drag = DRAG,
+	dragend = DRAG,
+	hover = { c = "int", r = "int", out = "bool" },
+}
+
+local MAX_INT = 2 ^ 53 - 1 -- SPEC §3.3
+local NO_FLOATS = {}
+
+-- Whether v is of type t. is_float says whether v was a msgpack float, and
+-- floats marks the floats in v's tables (hotty.msgpack.decode): a number
+-- is an int when it was not one.
+--
+-- A Lua table does not say whether it was a map or an array, so a map is a
+-- table whose keys are all strings, and an array one whose keys are 1 to n.
+-- An array where a map belongs (a host that writes a struct as an array)
+-- then does not decode, but an empty one reads as an empty map, and the
+-- other way round. And nil is absent: a known field holding nil reads as
+-- left out, and a nil at an array's end goes unseen.
+local function typed(v, t, is_float, floats)
+	if t == "int" then
+		return type(v) == "number" and not is_float and v == floor(v) and v >= -MAX_INT and v <= MAX_INT
+	elseif t == "float" then
+		return type(v) == "number" and is_float == true
+	elseif t == "str" then
+		return type(v) == "string"
+	elseif t == "bool" then
+		return type(v) == "boolean"
+	elseif type(v) ~= "table" then
+		return false
+	end
+	local marks = floats[v] or NO_FLOATS
+	if t[1] then
+		local n = 0
+		for _ in pairs(v) do
+			n = n + 1
+		end
+		for i = 1, n do
+			if v[i] == nil or not typed(v[i], t[1], marks[i], floats) then
+				return false
+			end
+		end
+		return true
+	end
+	local each = t["*"]
+	for k, x in pairs(v) do
+		if type(k) ~= "string" or (each and not typed(x, each, marks[k], floats)) then
+			return false
+		end
+	end
+	if not each then
+		for k, f in pairs(t) do
+			if v[k] ~= nil and not typed(v[k], f, marks[k], floats) then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- A body's map when each field t names has its type: nil when it does not
+-- decode, which leaves absent all it would fill (SDK.md §3.9).
+local function typed_body(v, floats, t)
+	if type(v) == "table" and typed(v, t, false, type(floats) == "table" and floats or NO_FLOATS) then
+		return v
+	end
+	return nil
+end
+
 local Message = {}
 Message.__index = Message
 M.Message = Message
@@ -525,16 +614,32 @@ local function message(control, keys, payload)
 	return setmetatable({ control = control, keys = keys, payload = payload }, Message)
 end
 
---- The payload read as JSON, or nil.
-function Message:json()
+--- The body (SPEC §3.3), as hotty.msgpack.decode reads it: a table and its
+--- floats. nil when there is none, and nil and an error when it is not one
+--- msgpack value, or that value is not a table.
+function Message:body()
 	if self.payload == "" then
 		return nil
 	end
-	if self._json == nil then
-		local v = json.decode(self.payload)
-		self._json = v == nil and false or v
+	if self._body == nil then
+		local v, floats = msgpack.decode(self.payload)
+		if type(v) == "table" then
+			self._body, self._floats = v, floats
+		else
+			self._body = false
+			self._err = v == nil and type(floats) == "string" and floats or "hotty: a body that is not a map"
+		end
 	end
-	return self._json or nil
+	if not self._body then
+		return nil, self._err
+	end
+	return self._body, self._floats
+end
+
+-- m's body's map when each field t names has its type, or nil.
+local function typed_message(m, t)
+	local v, floats = m:body()
+	return typed_body(v, floats, t)
 end
 
 local Reply = {}
@@ -557,10 +662,9 @@ function Message:reply()
 		rows = to_int(c.r),
 	}, Reply)
 	if not r.ok then
-		local body = self:json()
-		if json.is_object(body) then
-			r.code = str(body.code)
-			r.detail = str(body.detail)
+		local body = typed_message(self, ERROR)
+		if body then
+			r.code, r.detail = body.code, body.detail
 		end
 	end
 	return r
@@ -570,13 +674,48 @@ local Caps = {}
 Caps.__index = Caps
 M.Caps = Caps
 
---- The capabilities a reply to a query carries, or nil.
+-- The capabilities in a body whose fields have their types.
+local function new_caps(d)
+	local c = setmetatable({ raw = d }, Caps)
+	c.v = d.v or ""
+	c.ops = d.ops or {}
+	c.events = d.events or {}
+	if d.cell and d.cell.w and d.cell.h then
+		c.cell = { w = d.cell.w, h = d.cell.h }
+	end
+	c.scale = d.scale
+	c.scheme = d.scheme or ""
+	c.limits = d.limits or {}
+	c.net = d.net or {}
+	c.passthrough = d.passthrough == true
+	c.scroll = d.scroll == true
+	c.steps = d.steps == true
+	c.host = d.host
+	c.version = d.version
+	return c
+end
+
+--- What a host says about itself (SPEC §4), from the body of its reply to a
+--- query, the msgpack bytes: plx's raw is the same. nil when there is no
+--- body, or it does not decode (SDK.md §3.9). raw is the body's map, with
+--- the fields the SDK does not know.
+function M.caps(body)
+	if type(body) ~= "string" or body == "" then
+		return nil
+	end
+	local v, floats = msgpack.decode(body)
+	local d = typed_body(v, floats, CAPS)
+	return d and new_caps(d) or nil
+end
+
+--- The capabilities a reply to a query carries, or nil: none, or a body
+--- that does not decode.
 function Reply:caps()
 	if not self.ok or self.re ~= "q" then
 		return nil
 	end
-	local d = self.message:json()
-	return M.caps(json.is_object(d) and d or {})
+	local d = typed_message(self.message, CAPS)
+	return d and new_caps(d) or nil
 end
 
 --- The reply as an error, or nil when it is ok.
@@ -591,49 +730,53 @@ local Event = {}
 Event.__index = Event
 M.Event = Event
 
---- The message as an event (SPEC §9), or nil if it is not one.
+--- The message as an event (SPEC §9), or nil if it is not one. Its detail
+--- is read by its kind (SDK.md §3.9): the body's map when it decodes as the
+--- kind's, and empty when it does not, or the kind is one the SDK does not
+--- know, whose body is the message's.
 function Message:event()
 	local c = self.control
 	if c.a ~= "ev" then
 		return nil
 	end
-	local d = self:json()
+	local t = DETAIL[c.e]
+	local d = t and typed_message(self, t)
 	return setmetatable({
 		message = self,
 		surface = c.s,
 		kind = c.e,
 		target = c.t or "",
-		detail = json.is_object(d) and d or {},
+		detail = d or {},
+		_decoded = d ~= nil,
 	}, Event)
 end
 
 --- The detail's value, a string: click, change, input.
 function Event:value()
-	return str(self.detail.value)
+	local k = self.kind
+	if k ~= M.EVENT_CLICK and k ~= M.EVENT_CHANGE and k ~= M.EVENT_INPUT then
+		return nil
+	end
+	return self.detail.value
 end
 
 --- The detail's checked, a boolean: change.
 function Event:checked()
-	local v = self.detail.checked
-	if type(v) == "boolean" then
-		return v
+	if self.kind ~= M.EVENT_CHANGE then
+		return nil
 	end
-	return nil
+	return self.detail.checked
 end
 
---- A submit's fields by name: a string as it is, any other value as its
---- JSON, a null left out.
+--- A submit's fields, names to strings; nil when its detail does not
+--- decode.
 function Event:fields()
-	if self.kind ~= M.EVENT_SUBMIT then
+	if self.kind ~= M.EVENT_SUBMIT or not self._decoded then
 		return nil
 	end
 	local out = {}
 	for k, v in pairs(self.detail) do
-		if type(v) == "string" then
-			out[k] = v
-		elseif v ~= json.null then
-			out[k] = json.encode(v)
-		end
+		out[k] = v
 	end
 	return out
 end
@@ -641,16 +784,16 @@ end
 --- A link's click: its href, and its url, or nil when there is none.
 function Event:link()
 	local href = self.detail.href
-	if self.kind ~= M.EVENT_CLICK or type(href) ~= "string" then
+	if self.kind ~= M.EVENT_CLICK or href == nil then
 		return nil
 	end
-	return href, str(self.detail.url)
+	return href, self.detail.url
 end
 
 --- A resize's w and h, in CSS pixels.
 function Event:size()
 	local w, h = self.detail.w, self.detail.h
-	if self.kind ~= M.EVENT_RESIZE or not (is_num(w) and is_num(h)) then
+	if self.kind ~= M.EVENT_RESIZE or w == nil or h == nil then
 		return nil
 	end
 	return w, h
@@ -658,35 +801,29 @@ end
 
 --- A fit's rows.
 function Event:fit_rows()
-	local r = self.detail.r
-	if self.kind ~= M.EVENT_FIT or not is_int(r) then
+	if self.kind ~= M.EVENT_FIT then
 		return nil
 	end
-	return r
+	return self.detail.r
 end
 
 --- A drag's cell and the keys held: {c, r, keys}, and its steps x and y
 --- for an element with data-steps (SPEC §9.1), each nil when the detail
---- has none or one that is not a whole number; 0 is a step like any other.
+--- has none; 0 is a step like any other.
 function Event:drag()
 	local k = self.kind
 	if k ~= M.EVENT_DRAG_START and k ~= M.EVENT_DRAG and k ~= M.EVENT_DRAG_END then
 		return nil
 	end
-	local c, r, keys = self.detail.c, self.detail.r, self.detail.keys
-	if not (is_int(c) and is_int(r)) then
+	local d = self.detail
+	if d.c == nil or d.r == nil then
 		return nil
 	end
-	local out = {}
-	if json.is_array(keys) then
-		for _, key in ipairs(keys) do
-			if type(key) == "string" then
-				out[#out + 1] = key
-			end
-		end
+	local keys = {}
+	for i, key in ipairs(d.keys or keys) do
+		keys[i] = key
 	end
-	local x, y = self.detail.x, self.detail.y
-	return { c = c, r = r, keys = out, x = is_int(x) and x or nil, y = is_int(y) and y or nil }
+	return { c = d.c, r = d.r, keys = keys, x = d.x, y = d.y }
 end
 
 --- A hover's cell, {c, r, out = false}, or {out = true} when the pointer
@@ -695,14 +832,14 @@ function Event:hover()
 	if self.kind ~= M.EVENT_HOVER then
 		return nil
 	end
-	if self.detail.out == true then
+	local d = self.detail
+	if d.out == true then
 		return { out = true }
 	end
-	local c, r = self.detail.c, self.detail.r
-	if not (is_int(c) and is_int(r)) then
+	if d.c == nil or d.r == nil then
 		return nil
 	end
-	return { c = c, r = r, out = false }
+	return { c = d.c, r = d.r, out = false }
 end
 
 --- A click's or a press's element, in cells from the surface's top left
@@ -712,63 +849,10 @@ function Event:area()
 		return nil
 	end
 	local a = self.detail.area
-	if not json.is_object(a) then
+	if not a or a.c == nil or a.r == nil or a.w == nil or a.h == nil then
 		return nil
 	end
-	local c, r, w, h = a.c, a.r, a.w, a.h
-	if not (is_int(c) and is_int(r) and is_int(w) and is_int(h)) then
-		return nil
-	end
-	return { c = c, r = r, w = w, h = h }
-end
-
-local function strings(v)
-	local out = {}
-	if json.is_array(v) then
-		for _, s in ipairs(v) do
-			if type(s) == "string" then
-				out[#out + 1] = s
-			end
-		end
-	end
-	return out
-end
-
---- What a host says about itself (SPEC §4), from its JSON object. Each field
---- is read on its own: one of an unexpected type is ignored, as one the
---- program does not know is.
-function M.caps(d)
-	local c = setmetatable({ raw = d }, Caps)
-	c.v = str(d.v) or ""
-	c.ops = strings(d.ops)
-	c.events = strings(d.events)
-	if json.is_object(d.cell) and is_num(d.cell.w) and is_num(d.cell.h) then
-		c.cell = { w = d.cell.w, h = d.cell.h }
-	end
-	c.scale = is_num(d.scale) and d.scale or nil
-	c.scheme = str(d.scheme) or ""
-	c.limits = {}
-	if json.is_object(d.limits) then
-		for k, v in pairs(d.limits) do
-			if is_int(v) then
-				c.limits[k] = v
-			end
-		end
-	end
-	c.net = {}
-	if json.is_object(d.net) then
-		for k, v in pairs(d.net) do
-			if json.is_array(v) then
-				c.net[k] = strings(v)
-			end
-		end
-	end
-	c.passthrough = d.passthrough == true
-	c.scroll = d.scroll == true
-	c.steps = d.steps == true
-	c.host = str(d.host)
-	c.version = str(d.version)
-	return c
+	return { c = a.c, r = a.r, w = a.w, h = a.h }
 end
 
 local function has(list, v)

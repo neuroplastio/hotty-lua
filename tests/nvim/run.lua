@@ -7,7 +7,15 @@
 -- the Neovim over RPC and reads what the host was sent.
 
 local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
-package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. root .. "/tests/nvim/?.lua;" .. package.path
+package.path = root
+	.. "/lua/?.lua;"
+	.. root
+	.. "/lua/?/init.lua;"
+	.. root
+	.. "/tests/nvim/?.lua;"
+	.. root
+	.. "/tests/?.lua;"
+	.. package.path
 
 local fakehost = require("fakehost")
 
@@ -169,7 +177,7 @@ test("a host: detected native, with its capabilities", function(spawn)
 		return t.lua("return T.mode") == "native"
 	end, "native")
 	eq(t.lua("return T.host"), "fake")
-	eq(t.lua("return T.term.caps.v"), "0.1")
+	eq(t.lua("return T.term.caps.v"), "0.2")
 	eq(t.host.queries, 1)
 	eq(t.host.problems, {})
 	return t
@@ -209,7 +217,7 @@ test(
 		wait(function()
 			return t.host.placements["t-card"] ~= nil
 		end, "the card's placement")
-		eq(t.lua("return T.term.caps.v"), "0.1")
+		eq(t.lua("return T.term.caps.v"), "0.2")
 		eq(t.host.queries, 1)
 		eq(t.host.problems, {})
 		return t
@@ -322,7 +330,7 @@ test("events of other surfaces, and other OSCs, are not the session's", function
 	card(t)
 	t.send(t.host:event("someone-else", "click", "go"))
 	t.send("\27]11;rgb:ffff/ffff/ffff\27\\")
-	t.send(t.host:event("t-card", "zoom", "map", '{"z":2}'))
+	t.send(t.host:event("t-card", "zoom", "map", { z = 2 }))
 	wait(function()
 		return #t.lua("return T.events") == 1
 	end, "the zoom")

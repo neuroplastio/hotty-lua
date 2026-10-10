@@ -57,7 +57,7 @@ an error.
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
 | keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
-| messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
+| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `hotty.caps(body)`, `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
 
 Where Lua differs:
 
@@ -83,6 +83,16 @@ Where Lua differs:
   (`opts.compress`, from bytes to zlib bytes), and a host never compresses
   what it sends (SPEC §3.3). The Decoder inflates `o=z` itself, with a
   small inflate in Lua, for a relay or a test that reads a program's output.
+- **msgpack.** Lua has none either, and a host's bodies are msgpack (SPEC
+  §3.3): `hotty.msgpack.decode` reads them, in Lua. `msg:body()` is the
+  body it decoded, a table with no metatable, and its floats.
+- **Numbers are doubles** in Lua 5.1, LuaJIT and gopher-lua, so `7` and
+  `7.0` are one number. `hotty.msgpack.decode` says which were floats, and
+  each field of a body is read by its type (SDK.md §3.9): `7.0` in an int
+  field, or `2` in a float one, and the body does not decode. An int
+  further than 2^53 − 1 from 0 does not decode either. A table does not
+  say whether it was a msgpack map or an array: [`docs/plx.md`](docs/plx.md)
+  has what that leaves.
 
 ## A field in cells
 
@@ -186,8 +196,9 @@ session:surface("card", {
 
 plx owns the terminal and knows whether it is a host, so hotty.plx detects
 nothing and reads nothing itself. plx hands a script the host's
-capabilities (`ctx:hotty().raw`, and `on_hotty_caps` when the host
-changes) and every HOTTY message for its surfaces (`on_hotty`), and writes
+capabilities (`ctx:hotty().raw`, the msgpack body of the host's reply to
+plx's query, and `on_hotty_caps` when the host changes) and every HOTTY
+message for its surfaces (`on_hotty`), and writes
 what it sends (`ctx:hotty_send`) between its frames. Its relay names the
 script's surfaces apart from every other program's, places them where the
 tool or rail is on the screen, moves and clips them with it, and hides them
@@ -246,7 +257,7 @@ end
   `detach`, so there is no `detach_all`.
 
 plx-script has a pinned copy of `lua/hotty/` built in, all but `nvim.lua`.
-`hotty.base64` and `hotty.inflate` are seams: a host may
+`hotty.base64`, `hotty.inflate` and `hotty.msgpack` are seams: a host may
 preload native modules with the same functions, and plx does for base64.
 [`docs/plx.md`](docs/plx.md) has their contract, and the primitives
 hotty.plx is built on, as agreed with plexos.
@@ -299,6 +310,9 @@ plx script:
 - **A multiple assignment assigns as it goes**: in `a, b = a + 1, a`, `b`
   gets the new `a`. The SDK assigns apart where a value reads a name
   assigned before it.
+- **`math.huge` is the largest double**, not infinity, and a product that
+  is −0 comes out 0, so the msgpack decoder makes its own infinity and puts
+  a float's sign on by negation.
 
 ## Licence
 
