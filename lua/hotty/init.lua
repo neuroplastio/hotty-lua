@@ -544,64 +544,76 @@ local DETAIL = {
 }
 
 local MAX_INT = 2 ^ 53 - 1 -- SPEC §3.3
-local NO_FLOATS = {}
+local NO_KINDS = {}
 
--- Whether v is of type t. is_float says whether v was a msgpack float, and
--- floats marks the floats in v's tables (hotty.msgpack.decode): a number
--- is an int when it was not one.
---
--- A Lua table does not say whether it was a map or an array, so a map is a
--- table whose keys are all strings (decode fails any other key), and an
--- array one whose keys are 1 to n. An array where a map belongs (a host that
--- writes a struct as an array) then does not decode, but an empty one reads
--- as an empty map, and the other way round, and a timestamp as a map of sec
--- and nsec. An extension no one defines is absent: in a known field it reads
--- as left out, and at an array's end it goes unseen.
-local function typed(v, t, is_float, floats)
+-- Whether v is of type t. kind is v's mark in its table, and kinds marks
+-- the entries of v's tables (hotty.msgpack.decode): an entry is a float, a
+-- bin, an array, a timestamp or an extension of another type when marked so,
+-- and otherwise an int, a str, a bool or a map, which its Lua type tells
+-- apart. An extension of another type is absent, v nil, so it is of no type.
+local function typed(v, t, kind, kinds)
 	if t == "int" then
-		return type(v) == "number" and not is_float and v == floor(v) and v >= -MAX_INT and v <= MAX_INT
+		return kind == nil and type(v) == "number" and v == floor(v) and v >= -MAX_INT and v <= MAX_INT
 	elseif t == "float" then
-		return type(v) == "number" and is_float == true
+		return kind == "float" and type(v) == "number"
 	elseif t == "str" then
-		return type(v) == "string"
+		return kind == nil and type(v) == "string"
 	elseif t == "bool" then
-		return type(v) == "boolean"
-	elseif type(v) ~= "table" then
+		return kind == nil and type(v) == "boolean"
+	elseif type(v) ~= "table" or kind ~= (t[1] and "array" or nil) then
 		return false
 	end
-	local marks = floats[v] or NO_FLOATS
+	local marks = kinds[v] or NO_KINDS
 	if t[1] then
 		local n = 0
 		for _ in pairs(v) do
 			n = n + 1
 		end
+		for i in pairs(marks) do
+			if v[i] == nil then -- an extension: a hole, or past the end
+				return false
+			end
+		end
 		for i = 1, n do
-			if v[i] == nil or not typed(v[i], t[1], marks[i], floats) then
+			if v[i] == nil or not typed(v[i], t[1], marks[i], kinds) then
 				return false
 			end
 		end
 		return true
 	end
 	local each = t["*"]
-	for k, x in pairs(v) do
-		if type(k) ~= "string" or (each and not typed(x, each, marks[k], floats)) then
-			return false
-		end
-	end
-	if not each then
-		for k, f in pairs(t) do
-			if v[k] ~= nil and not typed(v[k], f, marks[k], floats) then
+	if each then
+		for k, x in pairs(v) do
+			if not typed(x, each, marks[k], kinds) then
 				return false
 			end
+		end
+		for k in pairs(marks) do
+			if v[k] == nil then -- an extension, where every field is known
+				return false
+			end
+		end
+		return true
+	end
+	for k, f in pairs(t) do
+		if (v[k] ~= nil or marks[k]) and not typed(v[k], f, marks[k], kinds) then
+			return false
 		end
 	end
 	return true
 end
 
+-- Whether the msgpack bytes s are a map: decode marks nothing the whole
+-- value is, so its first byte tells.
+local function is_map(s)
+	local c = byte(s, 1)
+	return c ~= nil and ((c >= 0x80 and c <= 0x8F) or c == 0xDE or c == 0xDF)
+end
+
 -- A body's map when each field t names has its type: nil when it does not
 -- decode, which leaves absent all it would fill (SDK.md §3.9).
-local function typed_body(v, floats, t)
-	if type(v) == "table" and typed(v, t, false, type(floats) == "table" and floats or NO_FLOATS) then
+local function typed_body(v, kinds, t)
+	if type(v) == "table" and typed(v, t, nil, type(kinds) == "table" and kinds or NO_KINDS) then
 		return v
 	end
 	return nil
@@ -615,32 +627,32 @@ local function message(control, keys, payload)
 	return setmetatable({ control = control, keys = keys, payload = payload }, Message)
 end
 
---- The body (SPEC §3.3), as hotty.msgpack.decode reads it: a table and its
---- floats. nil when there is none, and nil and an error when it is not one
---- msgpack value, or that value is not a table.
+--- The body (SPEC §3.3), as hotty.msgpack.decode reads it: a map and its
+--- kinds. nil when there is none, and nil and an error when it is not one
+--- msgpack value, or that value is not a map.
 function Message:body()
 	if self.payload == "" then
 		return nil
 	end
 	if self._body == nil then
-		local v, floats = msgpack.decode(self.payload)
-		if type(v) == "table" then
-			self._body, self._floats = v, floats
+		local v, kinds = msgpack.decode(self.payload)
+		if type(v) == "table" and is_map(self.payload) then
+			self._body, self._kinds = v, kinds
 		else
 			self._body = false
-			self._err = v == nil and type(floats) == "string" and floats or "hotty: a body that is not a map"
+			self._err = v == nil and type(kinds) == "string" and kinds or "hotty: a body that is not a map"
 		end
 	end
 	if not self._body then
 		return nil, self._err
 	end
-	return self._body, self._floats
+	return self._body, self._kinds
 end
 
 -- m's body's map when each field t names has its type, or nil.
 local function typed_message(m, t)
-	local v, floats = m:body()
-	return typed_body(v, floats, t)
+	local v, kinds = m:body()
+	return typed_body(v, kinds, t)
 end
 
 local Reply = {}
@@ -701,11 +713,11 @@ end
 --- body, or it does not decode (SDK.md §3.9). raw is the body's map, with
 --- the fields the SDK does not know.
 function M.caps(body)
-	if type(body) ~= "string" or body == "" then
+	if type(body) ~= "string" or not is_map(body) then
 		return nil
 	end
-	local v, floats = msgpack.decode(body)
-	local d = typed_body(v, floats, CAPS)
+	local v, kinds = msgpack.decode(body)
+	local d = typed_body(v, kinds, CAPS)
 	return d and new_caps(d) or nil
 end
 

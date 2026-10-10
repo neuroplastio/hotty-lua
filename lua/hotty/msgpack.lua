@@ -117,20 +117,23 @@ local function timestamp(s, i, n)
 	return { sec = sec, nsec = nsec }
 end
 
--- An extension of n bytes at i, after its type: a timestamp, or nil for any
--- other type, which is absent.
+-- An extension of n bytes at i, after its type, and its kind: a timestamp,
+-- "time", or nil for any other type, which is absent, "ext".
 local function ext(s, i, n)
 	need(s, i, n + 1)
 	if byte(s, i) == 0xFF then
-		return timestamp(s, i + 1, n), i + 1 + n
+		return timestamp(s, i + 1, n), i + 1 + n, "time"
 	end
-	return nil, i + 1 + n
+	return nil, i + 1 + n, "ext"
 end
 
+-- A str (UTF-8) or a bin of n bytes at i, and a bin's kind.
 local function bytes(s, i, n, str)
 	need(s, i, n)
 	local v = sub(s, i, i + n - 1)
-	if str and not utf8.valid(v) then
+	if not str then
+		return v, i + n, "bin"
+	elseif not utf8.valid(v) then
 		fail("a str that is not UTF-8")
 	end
 	return v, i + n
@@ -147,22 +150,22 @@ local function enter(s, i, n, depth, size)
 	end
 end
 
-local function array(s, i, n, depth, floats)
+local function array(s, i, n, depth, kinds)
 	enter(s, i, n, depth, 1)
 	local t, marks = {}, nil
 	for k = 1, n do
-		local v, is_float
-		v, i, is_float = read(s, i, depth + 1, floats)
+		local v, kind
+		v, i, kind = read(s, i, depth + 1, kinds)
 		t[k] = v -- an absent extension leaves a hole
-		if is_float then
+		if kind then
 			marks = marks or {}
-			marks[k] = true
+			marks[k] = kind
 		end
 	end
 	if marks then
-		floats[t] = marks
+		kinds[t] = marks
 	end
-	return t, i
+	return t, i, "array"
 end
 
 -- Whether c starts a str: fixstr, or str 8, 16 or 32.
@@ -170,7 +173,7 @@ local function is_str(c)
 	return (c >= 0xA0 and c < 0xC0) or (c >= 0xD9 and c <= 0xDB)
 end
 
-local function map(s, i, n, depth, floats)
+local function map(s, i, n, depth, kinds)
 	enter(s, i, n, depth, 2)
 	local t, marks = {}, nil
 	for _ = 1, n do
@@ -178,19 +181,21 @@ local function map(s, i, n, depth, floats)
 		if c and not is_str(c) then -- no byte at all is cut short, which read says
 			fail("a map key that is not a str")
 		end
-		local k, v, is_float
-		k, i = read(s, i, depth + 1, floats)
-		v, i, is_float = read(s, i, depth + 1, floats)
-		t[k] = v -- an absent extension leaves the key out, even one given before
-		if is_float then
+		local k, v, kind
+		k, i = read(s, i, depth + 1, kinds)
+		-- Every key given has a value or a mark: an absent one is "ext".
+		if t[k] ~= nil or (marks and marks[k]) then
+			fail("a key given twice")
+		end
+		v, i, kind = read(s, i, depth + 1, kinds)
+		t[k] = v -- an absent extension leaves the key out
+		if kind then
 			marks = marks or {}
-			marks[k] = true
-		elseif marks then
-			marks[k] = nil -- a key twice: the last value counts
+			marks[k] = kind
 		end
 	end
-	if marks and next(marks) ~= nil then
-		floats[t] = marks
+	if marks then
+		kinds[t] = marks
 	end
 	return t, i
 end
@@ -214,9 +219,9 @@ local SIZED = {
 	[0xDF] = { "map", 4 },
 }
 
--- The value at s[i], depth containers deep: it, the index after it, and
--- whether it is a float.
-read = function(s, i, depth, floats)
+-- The value at s[i], depth containers deep: it, the index after it, and its
+-- kind where a Lua value cannot show its msgpack type (M.decode).
+read = function(s, i, depth, kinds)
 	local c = byte(s, i)
 	if not c then
 		fail("cut short")
@@ -225,9 +230,9 @@ read = function(s, i, depth, floats)
 	if c < 0x80 then
 		return c, i
 	elseif c < 0x90 then
-		return map(s, i, c - 0x80, depth, floats)
+		return map(s, i, c - 0x80, depth, kinds)
 	elseif c < 0xA0 then
-		return array(s, i, c - 0x90, depth, floats)
+		return array(s, i, c - 0x90, depth, kinds)
 	elseif c < 0xC0 then
 		return bytes(s, i, c - 0xA0, true)
 	elseif c >= 0xE0 then
@@ -238,7 +243,7 @@ read = function(s, i, depth, floats)
 		return c == 0xC3, i
 	elseif c == 0xCA or c == 0xCB then
 		local n = c == 0xCA and 4 or 8
-		return float(s, i, n), i + n, true
+		return float(s, i, n), i + n, "float"
 	elseif c >= 0xCC and c <= 0xD3 then
 		local unsigned = c <= 0xCF
 		local n = SIZES[unsigned and c - 0xCB or c - 0xCF]
@@ -258,21 +263,23 @@ read = function(s, i, depth, floats)
 	elseif kind == "ext" then
 		return ext(s, i, n)
 	elseif kind == "array" then
-		return array(s, i, n, depth, floats)
+		return array(s, i, n, depth, kinds)
 	end
-	return map(s, i, n, depth, floats)
+	return map(s, i, n, depth, kinds)
 end
 
---- The one value s holds, and its floats: a table whose keys are the tables
---- of the value, floats[t][k] true where t[k] was a float. nil and an error
---- ("msgpack: …") when s is not one value, which a nil or a map key that is
---- not a str anywhere in it makes it: docs/plx.md has the whole contract.
+--- The one value s holds, and its kinds: a table whose keys are the tables
+--- of the value, kinds[t][k] the msgpack type of t[k] where a Lua value
+--- cannot show it ("float", "bin", "array", "time", "ext"). nil and an error
+--- ("msgpack: …") when s is not one value, which a nil, a map key that is
+--- not a str or a key given twice anywhere in it makes it: docs/plx.md has
+--- the whole contract.
 function M.decode(s)
 	if type(s) ~= "string" then
 		return nil, "msgpack: not a string"
 	end
-	local floats = {}
-	local ok, v, i = pcall(read, s, 1, 0, floats)
+	local kinds = {}
+	local ok, v, i = pcall(read, s, 1, 0, kinds)
 	if not ok then
 		if type(v) == "table" and v.msgpack then
 			return nil, v.msgpack
@@ -282,7 +289,7 @@ function M.decode(s)
 	if i <= #s then
 		return nil, "msgpack: bytes after the value"
 	end
-	return v, floats
+	return v, kinds
 end
 
 return M

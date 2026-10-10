@@ -48,9 +48,10 @@ that `init.lua` uses what it is given, and pins the edges below.
   `MAX` bytes out (16 MiB; `init.lua` does not read it). Bytes after the
   checksum are ignored.
 - `hotty.msgpack.decode(s)`: the one msgpack value the bytes `s` hold (a
-  host's body, SPEC §3.3), and its floats: `value, floats`. Or `nil` and
-  an error, a string that starts with `msgpack: `, when `s` is not one
-  value (below).
+  host's body, SPEC §3.3), and its kinds: `value, kinds`. Or `nil` and an
+  error, a string that starts with `msgpack: `, when `s` is not one value
+  (below). This is exact: plexos-script mirrors it in Go, and its
+  differential test compares values, kinds and refusals.
   - **The value** is plain Lua, with no metatables. A map is a table keyed
     by its keys, which are strings (any other key is not one value, below),
     and an array a table with its elements at 1 to n. str and bin are
@@ -58,22 +59,30 @@ that `init.lua` uses what it is given, and pins the edges below.
     as IEEE 754 has it: -0, the infinities and NaN too). Extension −1, a
     timestamp of 4, 8 or 12 bytes, is `{ sec = n, nsec = n }`.
   - **Any other extension is absent,** and nothing else is. A map's key
-    whose value is absent is left out. A key given twice keeps its last
-    value and its mark in `floats`, so an absent last value leaves the key
-    out even when it was given one before. An array's absent element
-    leaves a hole, so an array has no length of its own: `#` of a table
-    with a hole may be any of its borders. A value that is absent as a
-    whole decodes as `nil` and an empty `floats`.
-  - **floats** is a table whose keys are the tables of the value:
-    `floats[t][k] == true` where `t[k]` was a msgpack float, of 32 or 64
-    bits. Lua 5.1, LuaJIT and gopher-lua have one number type, and this is
-    how typed reading tells `7.0` from `7`. Only a table that holds a float
-    is a key, and only its floats are marked; a float that is the whole
-    value has no table to be marked in.
+    whose value is absent is left out. An array's absent element leaves a
+    hole, so an array has no length of its own: `#` of a table with a hole
+    may be any of its borders. A value that is absent as a whole decodes as
+    `nil` and an empty `kinds`.
+  - **kinds** is a table whose keys are the tables of the value:
+    `kinds[t][k]` is a string for each entry of a table `t` whose msgpack
+    type a Lua value cannot show:
+    - `"float"`: a float, of 32 or 64 bits (`t[k]` the number);
+    - `"bin"`: a bin (`t[k]` the string);
+    - `"array"`: an array (`t[k]` its table, its elements at 1 to n);
+    - `"time"`: a timestamp (`t[k]` is `{ sec = n, nsec = n }`);
+    - `"ext"`: an extension of another type (`t[k]` absent: a hole in an
+      array, a key left out of a map; the mark is there all the same).
+
+    Every other entry is unmarked: an int, a str, a bool, a map (a
+    timestamp's `sec` and `nsec` are ints). Only a table that holds a marked
+    entry is a key of `kinds`. The whole value has no table to be marked in.
+    Lua 5.1, LuaJIT and gopher-lua have one number type, and one table for
+    a map and an array: this is how typed reading tells `7.0` from `7`, and
+    `[]` from `{}`.
   - **Not one value**, which is `nil` and an error. Each is checked
     wherever it is in `s`, at any depth: a map's key or value, an array's
-    element, a value that a key given again replaces. An extension's data
-    is not msgpack, so nothing in that of an absent one is checked:
+    element. An extension's data is not msgpack, so nothing in that of an
+    absent one is checked:
     - bytes after the value, or bytes cut short (a length past the end
       too), or `s` not a string;
     - 0xc1, which no type starts with;
@@ -83,6 +92,10 @@ that `init.lua` uses what it is given, and pins the edges below.
     - nil (0xc0);
     - a map key that is not a str: an int, a float, a bool, a bin, a nil,
       an array, a map, a timestamp or any other extension;
+    - a key given twice in one map, whatever its values, absent ones too:
+      `msgpack: a key given twice`. Keys compare as the strings they decode
+      to, so a fixstr and a str 8 of one name are one key given twice; one
+      name in two maps is not;
     - an int further than 2^53 − 1 from 0 either way (−2^53 too), in any
       of its forms;
     - a str that is not UTF-8 (an overlong form, a surrogate, anything past
@@ -92,17 +105,17 @@ that `init.lua` uses what it is given, and pins the edges below.
       or of 12 bytes with seconds further than 2^53 − 1 from 1970 either
       way (−2^53 too).
 
-`init.lua` reads a body by the type SPEC §3.3 gives each field it knows: an
-int is a whole number that `floats` does not mark, a float one it marks. A
-table does not say whether it was a map or an array, so a map is read as a
-table whose keys are all strings (a map's always are), and an array as one
-whose keys are 1 to n. A host that writes a struct as an array then fails,
-as it should. What it cannot tell: an empty array reads as an empty map and
-the other way round; a timestamp where a map belongs reads as a map of
-`sec` and `nsec`; and an extension no one defines, which decode leaves
-absent, reads as left out in a known field and goes unseen at an array's
-end (a hole before an element fails). SPEC §3.3 has a host send none of
-these, and SDK.md §3.9 has a reader fail each.
+`init.lua` reads a body by the type SPEC §3.3 gives each field it knows,
+with `kinds`, so that it agrees with every other SDK: an int is a number
+`kinds` does not mark, a float one it marks `"float"`, a str a string it
+does not mark, a bool a boolean, an array a table marked `"array"`, and a
+map a table it does not mark. A known field marked anything else (a bin, a
+timestamp, an extension of another type, whose mark stands where decode
+left the field out) is of none of these, so the body does not decode, as
+SDK.md §3.9 has every reader fail it; so does a known array with an
+extension in it, a hole or past its last element. The body is the whole
+value, which has no mark, so it is a map when its first byte is one of a
+map's (0x80–0x8f, 0xde, 0xdf).
 
 `hotty.join` and `hotty.utf8` are not seams.
 

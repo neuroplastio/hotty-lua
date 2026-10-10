@@ -85,14 +85,15 @@ Where Lua differs:
   small inflate in Lua, for a relay or a test that reads a program's output.
 - **msgpack.** Lua has none either, and a host's bodies are msgpack (SPEC
   §3.3): `hotty.msgpack.decode` reads them, in Lua. `msg:body()` is the
-  body it decoded, a table with no metatable, and its floats.
+  body it decoded, a map, as a table with no metatable, and its kinds.
 - **Numbers are doubles** in Lua 5.1, LuaJIT and gopher-lua, so `7` and
-  `7.0` are one number. `hotty.msgpack.decode` says which were floats, and
-  each field of a body is read by its type (SDK.md §3.9): `7.0` in an int
-  field, or `2` in a float one, and the body does not decode. An int
-  further than 2^53 − 1 from 0 does not decode either. A table does not
-  say whether it was a msgpack map or an array: [`docs/plx.md`](docs/plx.md)
-  has what that leaves.
+  `7.0` are one number, and a table is a map or an array. So
+  `hotty.msgpack.decode` marks what a Lua value cannot show (a float, a
+  bin, an array, a timestamp, an extension of another type), and each
+  field of a body is read by its type (SDK.md §3.9), as in every other
+  SDK: `7.0` in an int field, `2` in a float one, or `[]` in a map one,
+  and the body does not decode. An int further than 2^53 − 1 from 0 does
+  not decode either. [`docs/plx.md`](docs/plx.md) has the contract.
 
 ## A field in cells
 

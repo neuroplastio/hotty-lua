@@ -137,9 +137,9 @@ local function hex(h)
 end
 
 local function one(h, what)
-	local v, floats = msgpack.decode(hex(h))
-	ok(type(floats) == "table", (what or h) .. ": " .. tostring(floats))
-	return v, floats
+	local v, kinds = msgpack.decode(hex(h))
+	ok(type(kinds) == "table", (what or h) .. ": " .. tostring(kinds))
+	return v, kinds
 end
 
 local function fails(h, what)
@@ -174,9 +174,9 @@ test("msgpack: every form of an int, within 2^53 - 1 of 0", function()
 		{ "d3 ffffffffffffffff", -1 },
 		{ "d3 001fffffffffffff", 2 ^ 53 - 1 },
 	}) do
-		local v, floats = one(c[1])
+		local v, kinds = one(c[1])
 		eq(v, c[2], c[1])
-		eq(next(floats), nil, c[1] .. ": no floats")
+		eq(next(kinds), nil, c[1] .. ": no kinds")
 	end
 	fails("cf 0020000000000000", "2^53")
 	fails("cf ffffffffffffffff", "2^64 - 1")
@@ -235,10 +235,9 @@ test("msgpack: arrays and maps in every form", function()
 		eq(one(h).a, 1, h .. ": a key in each form of a str")
 	end
 	eq(one("81 a0 01")[""], 1, "the empty str")
-	local v = one("82 a1 62 01 a1 62 02")
+	local v = one("82 a1 61 01 a1 62 02")
 	ok(getmetatable(v) == nil, "no metatable")
-	eq(count(v), 1)
-	eq(v.b, 2, "a key twice: the last value")
+	eq(count(v), 2)
 end)
 
 test("msgpack: an array keeps no length of its own", function()
@@ -293,34 +292,99 @@ test("msgpack: a timestamp in 4, 8 or 12 bytes; any other extension is absent", 
 		eq(v[2], nil, "a hole")
 		eq(v[3], 3)
 	end
-	local v, floats = one("82 a1 61 cb 3ff8000000000000 a1 61 d4 05 00")
-	eq(next(v), nil, "an absent last value leaves out a key given before")
-	eq(next(floats), nil, "and its mark")
 	eq(one("c7 01 05 c0"), nil, "an extension's data is not read: no nil there")
 	eq(one("91 c7 02 05 81 01")[1], nil, "nor a key")
 end)
 
-test("msgpack: floats marks the floats of each table", function()
-	-- {"a": 1.0, "b": 1, "c": [2.0, 2], "d": {"e": float32 3.5}, "f": {"g": 1}}
-	local v, floats = one(
-		"85 a1 61 cb 3ff0000000000000 a1 62 01 a1 63 92 cb 4000000000000000 02"
-			.. " a1 64 81 a1 65 ca 40600000 a1 66 81 a1 67 01"
+test("msgpack: kinds marks each entry whose type a Lua value cannot show", function()
+	local v, kinds = one(
+		"8d"
+			.. " a1 61 cb 3ff0000000000000" -- a: 1.0
+			.. " a1 62 01" -- b: 1
+			.. " a1 63 95 cb 4000000000000000 02 c4 01 78 d4 05 00 d6 ff 00000001" -- c: [2.0, 2, bin, ext, time]
+			.. " a1 64 81 a1 65 ca 40600000" -- d: {e: float32 3.5}
+			.. " a1 66 81 a1 67 01" -- f: {g: 1}
+			.. " a1 68 c4 02 6162" -- h: bin
+			.. " a1 69 90" -- i: []
+			.. " a1 6a 80" -- j: {}
+			.. " a1 6b d6 ff 00000002" -- k: a timestamp
+			.. " a1 6c d4 05 00" -- l: an extension of type 5
+			.. " a1 6d a1 73" -- m: "s"
+			.. " a1 6e c3" -- n: true
+			.. " a1 6f c7 00 05" -- o: an extension of type 5 and no data
 	)
 	eq(v.a, 1)
 	eq(v.b, 1, "1.0 and 1 are one number in Lua")
-	eq(floats[v].a, true)
-	eq(floats[v].b, nil)
-	eq(floats[v.c][1], true)
-	eq(floats[v.c][2], nil)
-	eq(floats[v.d].e, true, "a float of 32 bits")
-	eq(floats[v.f], nil, "only tables holding a float")
-	eq(count(floats), 3)
-	v, floats = one("82 a1 61 cb 3ff0000000000000 a1 61 01")
-	eq(next(floats), nil, "a float a key's last value replaced")
-	v, floats = one("82 a1 61 01 a1 61 cb 3ff0000000000000")
-	eq(floats[v].a, true)
-	v, floats = one("cb 3ff0000000000000")
-	eq(next(floats), nil, "a float alone has no table to mark")
+	eq(kinds[v].a, "float")
+	eq(kinds[v].b, nil, "an int")
+	eq(kinds[v].c, "array")
+	eq(kinds[v.c][1], "float")
+	eq(kinds[v.c][2], nil)
+	eq(kinds[v.c][3], "bin")
+	eq(v.c[3], "x")
+	eq(kinds[v.c][4], "ext")
+	eq(v.c[4], nil, "a hole, marked")
+	eq(kinds[v.c][5], "time")
+	eq(v.c[5].sec, 1)
+	eq(kinds[v].d, nil, "a map")
+	eq(kinds[v.d].e, "float", "a float of 32 bits")
+	eq(kinds[v.f], nil, "only tables holding a marked entry")
+	eq(kinds[v].h, "bin")
+	eq(v.h, "ab")
+	eq(kinds[v].i, "array", "an empty array")
+	eq(next(v.i), nil)
+	eq(kinds[v.i], nil)
+	eq(kinds[v].j, nil, "an empty map")
+	eq(next(v.j), nil)
+	eq(kinds[v].k, "time")
+	eq(v.k.sec, 2)
+	eq(kinds[v.k], nil, "a timestamp's table marks nothing")
+	eq(kinds[v].l, "ext")
+	eq(v.l, nil, "a key left out, marked")
+	eq(kinds[v].o, "ext")
+	eq(kinds[v].m, nil, "a str")
+	eq(kinds[v].n, nil, "a bool")
+	eq(count(kinds), 3)
+	eq(count(kinds[v]), 7)
+	eq(count(kinds[v.c]), 4)
+	v, kinds = one("92 90 80")
+	eq(kinds[v][1], "array", "the whole value's own entries")
+	eq(kinds[v][2], nil)
+	eq(count(kinds), 1)
+	for _, h in ipairs({ "cb 3ff0000000000000", "c4 01 61", "90", "80", "91 01", "d6 ff 00000001", "d4 05 00" }) do
+		v, kinds = one(h)
+		eq(next(kinds), nil, h .. ": the whole value has no table to be marked in")
+	end
+end)
+
+test("msgpack: a key given twice, in any map, whatever its values", function()
+	local _, err = msgpack.decode(hex("82 a1 61 01 a1 61 01"))
+	eq(err, "msgpack: a key given twice")
+	fails("82 a1 61 01 a1 61 01", "the same value")
+	fails("82 a1 61 01 a1 61 a1 62", "another value")
+	fails("83 a1 61 01 a1 62 01 a1 61 01", "not next to each other")
+	fails("82 a0 01 a0 01", "the empty str")
+	fails("82 a1 61 01 d9 01 61 01", "a fixstr and a str 8")
+	fails("82 da 0001 61 01 db 00000001 61 01", "a str 16 and a str 32")
+	fails("82 a2 c3a9 01 d9 02 c3a9 01", "a name past ASCII, in two forms")
+	fails("82 a1 61 d4 05 00 a1 61 01", "the first value absent")
+	fails("82 a1 61 01 a1 61 d4 05 00", "the second absent")
+	fails("82 a1 61 d4 05 00 a1 61 d4 05 00", "both absent")
+	fails("82 a1 61 d6 ff 00000001 a1 61 d6 ff 00000001", "two timestamps")
+	fails("de 0002 a1 61 01 a1 61 01", "in a map 16")
+	fails("81 a1 61 82 a1 62 01 a1 62 01", "in a nested map")
+	fails("91 82 a1 62 01 a1 62 01", "in a map in an array")
+	fails(string.rep("81 a1 61 ", 30) .. "82 a1 62 01 a1 62 01", "31 levels deep")
+	fails("82 a1 61 c4 01 78 a1 61 c4 01 78", "two bins")
+	local v = one("82 a1 61 01 a1 41 01")
+	eq(count(v), 2, "a and A are two keys")
+	v = one("82 a1 61 81 a1 62 01 a1 63 81 a1 62 02")
+	eq(v.a.b, 1, "one name in two maps")
+	eq(v.c.b, 2)
+	v = one("81 a1 61 81 a1 61 01")
+	eq(v.a.a, 1, "a map's key in the map it holds")
+	v = one("92 81 a1 61 01 81 a1 61 02")
+	eq(v[2].a, 2, "in two maps of an array")
 end)
 
 test("msgpack: what is not one value", function()
@@ -422,9 +486,9 @@ end
 
 test("messages: the body, decoded once, or nil and why", function()
 	local _, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, mp.pack({ w = mp.float(2) })))
-	local v, floats = m:body()
+	local v, kinds = m:body()
 	eq(v.w, 2)
-	eq(floats[v].w, true)
+	eq(kinds[v].w, "float")
 	eq(m:body(), v, "the same table")
 	_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, "\1\2"))
 	local none, err = m:body()
@@ -434,6 +498,19 @@ test("messages: the body, decoded once, or nil and why", function()
 	none, err = m:body()
 	eq(none, nil, "a body is a map")
 	eq(type(err), "string")
+	for _, h in ipairs({ "90", "92 a1 76 a3 302e32", "dc 0000", "d4 05 00", "d6 ff 00000001" }) do
+		_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, hex(h)))
+		none, err = m:body()
+		eq(none, nil, h)
+		eq(err, "hotty: a body that is not a map", h)
+	end
+	for _, h in ipairs({ "80", "de 0000", "df 00000000" }) do
+		_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, hex(h)))
+		eq(next((m:body())), nil, h .. ": an empty map")
+	end
+	_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }, hex("82 a1 61 01 a1 61 01")))
+	none, err = m:body()
+	eq(err, "msgpack: a key given twice")
 	_, m = hotty.decoder():feed(hotty.encode({ { "a", "ev" } }))
 	eq(m:body(), nil, "none")
 end)
@@ -454,9 +531,19 @@ test("area: four ints, in a map; another kind's detail is not read", function()
 	eq(next(ev("zoom", mp.pack({ value = "v" })).detail), nil)
 end)
 
--- A nil or a key that is not a str, anywhere, and the body does not decode
--- (SPEC §3.3): msgpack.decode fails it.
-test("bodies: a nil or a key that is not a str, in any field", function()
+-- A nil, a key that is not a str or a key given twice, anywhere, and the
+-- body does not decode (SPEC §3.3): msgpack.decode fails it.
+test("bodies: a nil, a key that is not a str or a key given twice, in any field", function()
+	eq(
+		ev("click", hex("82 a5 76616c7565 a1 61 a5 76616c7565 a1 61")):value(),
+		nil,
+		"a known field given twice, the same"
+	)
+	eq(
+		ev("click", hex("82 a5 76616c7565 a1 61 a6 667574757265 82 a1 61 01 d9 01 61 01")):value(),
+		nil,
+		"a key given twice in a field the SDK does not know"
+	)
 	eq(ev("click", mp.pack({ value = mp.NIL, href = "#x" })):link(), nil, "nil in a known field")
 	eq(
 		ev("click", mp.pack({ href = "#x", future = { 1, mp.NIL } })):link(),
@@ -473,25 +560,103 @@ test("bodies: a nil or a key that is not a str, in any field", function()
 	)
 end)
 
--- A Lua table does not say whether it was an array or a map, and an
--- extension no one defines is absent: where typed reading cannot tell
--- (docs/plx.md).
-test("typed reading: what a table cannot tell", function()
-	local c = caps(hex("82 a1 76 a3 302e32 a3 6f7073 80"))
-	ok(c and #c.ops == 0, "an empty map for an array")
-	eq(caps(hex("82 a1 76 a3 302e32 a6 6c696d697473 90")).v, "0.2", "an empty array for a map")
-	c = caps(hex("82 a1 76 a3 302e32 a4 63656c6c d6 ff 00000001"))
-	ok(c and c.cell == nil, "a timestamp for a map: one with neither w nor h")
-	eq(caps(hex("82 a1 76 a3 302e32 a6 6c696d697473 d6 ff 00000001")).limits.sec, 1, "or a map of ints")
-	eq(
-		ev("click", hex("82 a4 68726566 a2 2378 a5 76616c7565 d4 05 00")):link(),
-		"#x",
-		"an extension in a known field: left out"
+-- A known field is read by its type, as msgpack tells kinds apart: an
+-- int, a str, a bool and a map unmarked, a float and an array marked so;
+-- a bin, a timestamp or an extension of another type, which kinds marks,
+-- is no field's type (docs/plx.md).
+test("typed reading: a known field of another kind fails the body", function()
+	local V = "a1 76 a3 302e32 " -- v: "0.2"
+	-- A body of v and n - 1 fields more.
+	local function cap(n, h)
+		return caps(hex(string.format("%02x ", 0x80 + n) .. V .. h))
+	end
+	-- What a host sends decodes, and an unknown field of any kind is skipped.
+	local c = cap(
+		5,
+		"a3 6f7073 90" -- ops: []
+			.. " a6 6c696d697473 80" -- limits: {}
+			.. " a4 63656c6c 82 a1 77 09 a1 68 12" -- cell: {w: 9, h: 18}
+			.. " a5 7363616c65 cb 4000000000000000" -- scale: 2.0
 	)
-	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 92 a1 61 d4 05 00")).ops[1], "a", "an extension at an array's end")
-	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 93 a1 61 d4 05 00 a1 62")), nil, "an extension before an element")
-	eq(caps(hex("82 a1 76 a3 302e32 a4 63656c6c 92 09 12")), nil, "a non-empty array for a map")
+	ok(c and #c.ops == 0, "an empty array")
+	ok(next(c.limits) == nil, "an empty map")
+	eq(c.cell.h, 18)
+	eq(c.scale, 2)
+	c = cap(
+		7,
+		"a1 61 c4 01 78 a1 62 d6 ff 00000001 a1 63 d4 05 00 a1 64 cb 3ff0000000000000 a1 65 90 a1 66 92 c4 00 d4 05 00"
+	)
+	eq(c and c.v, "0.2", "unknown fields of every kind")
+	eq(c.raw.a, "x")
+	eq(cap(3, "a3 6e6574 81 a1 61 90 a3 6e6574 80"), nil, "a key given twice")
+	eq(caps(hex("de 0001 " .. V)).v, "0.2", "a map 16")
+	eq(caps(hex("df 00000001 " .. V)).v, "0.2", "a map 32")
+
+	for _, x in ipairs({
+		{ "a1 76 c4 03 302e32", "a bin for a str" },
+		{ "a1 76 d6 ff 00000001", "a timestamp for a str" },
+		{ "a1 76 d4 05 00", "an extension for a str" },
+		{ "a1 76 91 a3 302e32", "an array for a str" },
+	}) do
+		eq(caps(hex("81 " .. x[1])), nil, x[2])
+	end
+	for _, x in ipairs({
+		{ "a3 6f7073 80", "an empty map for an array" },
+		{ "a3 6f7073 81 a1 61 a1 61", "a map for an array" },
+		{ "a3 6f7073 c4 01 61", "a bin for an array" },
+		{ "a3 6f7073 d6 ff 00000001", "a timestamp for an array" },
+		{ "a3 6f7073 d4 05 00", "an extension for an array" },
+		{ "a3 6f7073 92 a1 61 d4 05 00", "an extension at an array's end" },
+		{ "a3 6f7073 93 a1 61 d4 05 00 a1 62", "an extension before an element" },
+		{ "a3 6f7073 91 d4 05 00", "an array of an extension" },
+		{ "a3 6f7073 92 a1 61 c4 01 62", "a bin in an array of strs" },
+		{ "a3 6f7073 91 d6 ff 00000001", "a timestamp in an array of strs" },
+		{ "a3 6f7073 91 90", "an array in an array of strs" },
+		{ "a4 63656c6c 90", "an empty array for a map" },
+		{ "a4 63656c6c 92 09 12", "an array for a map" },
+		{ "a4 63656c6c d6 ff 00000001", "a timestamp for a map" },
+		{ "a4 63656c6c c7 0c ff 00000000 0000000000000001", "a timestamp of 12 bytes for a map" },
+		{ "a4 63656c6c d4 05 00", "an extension for a map" },
+		{ "a4 63656c6c c4 00", "a bin for a map" },
+		{ "a4 63656c6c 82 a1 77 cb 4022000000000000 a1 68 12", "a float for an int" },
+		{ "a4 63656c6c 82 a1 77 09 a1 68 d4 05 00", "an extension for an int" },
+		{ "a4 63656c6c 82 a1 77 09 a1 68 d6 ff 00000001", "a timestamp for an int" },
+		{ "a4 63656c6c 82 a1 77 09 a1 68 c4 01 12", "a bin for an int" },
+		{ "a6 6c696d697473 90", "an empty array for a map of ints" },
+		{ "a6 6c696d697473 d6 ff 00000001", "a timestamp for a map of ints" },
+		{ "a6 6c696d697473 81 a1 61 d4 05 00", "an extension in a map of ints" },
+		{ "a6 6c696d697473 82 a1 61 01 a1 62 d4 05 00", "an extension after an int" },
+		{ "a6 6c696d697473 81 a1 61 cb 3ff0000000000000", "a float in a map of ints" },
+		{ "a3 6e6574 81 a1 61 80", "an empty map for an array, in a map" },
+		{ "a3 6e6574 81 a1 61 91 c4 01 61", "a bin, deeper" },
+		{ "a5 7363616c65 02", "an int for a float" },
+		{ "a5 7363616c65 d4 05 00", "an extension for a float" },
+		{ "a6 7363726f6c6c d4 05 00", "an extension for a bool" },
+		{ "a6 7363726f6c6c 01", "an int for a bool" },
+	}) do
+		eq(cap(2, x[1]), nil, x[2])
+	end
+	ok(cap(2, "a3 6e6574 81 a1 61 90"), "an empty array, in a map")
 	eq(caps(hex("92 a1 76 a3 302e32")), nil, "an array for the body")
+	eq(caps(hex("91 81 a1 76 a3 302e32")), nil, "a map in an array for the body")
+	eq(hotty.caps(hex("92 a1 76 a3 302e32")), nil, "an array for the body, as plx relays it")
+
+	local function detail(kind, h)
+		return ev(kind, hex(h)).detail
+	end
+	eq(next(detail("click", "82 a4 68726566 a2 2378 a5 76616c7565 d4 05 00")), nil, "an extension for a str")
+	eq(next(detail("click", "81 a5 76616c7565 c4 01 61")), nil, "a bin for a str")
+	eq(next(detail("click", "81 a5 76616c7565 d6 ff 00000001")), nil, "a timestamp for a str")
+	eq(next(detail("change", "82 a7 636865636b6564 d4 05 00 a5 76616c7565 a1 61")), nil, "an extension for a bool")
+	eq(next(detail("submit", "82 a1 61 a1 78 a1 62 d4 05 00")), nil, "an extension in a form")
+	eq(next(detail("submit", "81 a1 61 c4 01 78")), nil, "a bin in a form")
+	eq(next(detail("dragend", "81 a4 6b657973 92 a1 61 d4 05 00")), nil, "an extension in keys")
+	eq(next(detail("dragend", "81 a4 6b657973 80")), nil, "an empty map for keys")
+	eq(next(detail("click", "81 a4 61726561 90")), nil, "an empty array for an area")
+	eq(next(detail("resize", "82 a1 77 cb 4000000000000000 a1 68 d6 ff 00000001")), nil, "a timestamp for a float")
+	eq(detail("click", "82 a5 76616c7565 a1 61 a6 667574757265 d4 05 00").value, "a", "an unknown field's extension")
+	eq(detail("dragend", "81 a4 6b657973 90").keys[1], nil, "an empty array of keys")
+	eq(next(detail("click", "92 a5 76616c7565 a1 61")), nil, "an array for the body")
 end)
 
 test("caps: from a body's bytes, as plx relays them; scroll is a bool", function()
@@ -627,7 +792,8 @@ test("seams: init.lua uses the hotty.base64, hotty.inflate and hotty.msgpack it 
 			return inflate.zlib(s)
 		end,
 	}
-	-- Its answer whatever the bytes: a body that is no msgpack reads.
+	-- Its answer whatever the bytes after the first, which says a map (the
+	-- whole value is not marked): a body that is no msgpack reads.
 	local given = {
 		decode = function()
 			calls.msgpack = calls.msgpack + 1
@@ -650,10 +816,10 @@ test("seams: init.lua uses the hotty.base64, hotty.inflate and hotty.msgpack it 
 	r, m = fresh.decoder():feed("\27]7279;a=doc:s=x:o=z;" .. base64.encode(stored("<p>hi</p>")) .. "\27\\")
 	eq(m.payload, "<p>hi</p>")
 	eq(calls.zlib, 1, "zlib")
-	r, m = fresh.decoder():feed(fresh.encode({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, "not msgpack"))
+	r, m = fresh.decoder():feed(fresh.encode({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, "\128not msgpack"))
 	eq(m:reply():caps().v, "given")
 	eq(calls.msgpack, 1, "msgpack")
-	eq(fresh.caps("not msgpack").cell.w, 7)
+	eq(fresh.caps("\128not msgpack").cell.w, 7)
 	eq(calls.msgpack, 2)
 	eq(fresh.msgpack, given)
 end)
