@@ -12,7 +12,8 @@ local M = {}
 
 local FLOAT, ARRAY = {}, {}
 
---- nil, which a table cannot hold.
+--- nil, which a table cannot hold, and a host does not send (SPEC §3.3): for
+--- bodies that do not decode.
 M.NIL = setmetatable({}, {
 	__tostring = function()
 		return "nil"

@@ -551,11 +551,12 @@ local NO_FLOATS = {}
 -- is an int when it was not one.
 --
 -- A Lua table does not say whether it was a map or an array, so a map is a
--- table whose keys are all strings, and an array one whose keys are 1 to n.
--- An array where a map belongs (a host that writes a struct as an array)
--- then does not decode, but an empty one reads as an empty map, and the
--- other way round. And nil is absent: a known field holding nil reads as
--- left out, and a nil at an array's end goes unseen.
+-- table whose keys are all strings (decode fails any other key), and an
+-- array one whose keys are 1 to n. An array where a map belongs (a host that
+-- writes a struct as an array) then does not decode, but an empty one reads
+-- as an empty map, and the other way round, and a timestamp as a map of sec
+-- and nsec. An extension no one defines is absent: in a known field it reads
+-- as left out, and at an array's end it goes unseen.
 local function typed(v, t, is_float, floats)
 	if t == "int" then
 		return type(v) == "number" and not is_float and v == floor(v) and v >= -MAX_INT and v <= MAX_INT

@@ -40,16 +40,18 @@ local function uint(s, i, n)
 end
 
 -- An int of n bytes at i, big-endian, two's complement when signed. One
--- further than MAX_INT from 0 fails. In 8 bytes, that is told from the first
--- 11 bits, which must all be the sign, before anything is summed: so nothing
--- is rounded, or wraps where Lua's ints are 64 bits.
-local function int(s, i, n, signed)
+-- further than MAX_INT from 0 fails, as what (an int, by default). In 8
+-- bytes, that is told from the first 11 bits, which must all be the sign,
+-- before anything is summed: so nothing is rounded, or wraps where Lua's
+-- ints are 64 bits.
+local function int(s, i, n, signed, what)
 	need(s, i, n)
 	local neg = signed and byte(s, i) >= 0x80
+	what = what or "an int"
 	if n == 8 then
 		local b1, b2 = byte(s, i, i + 1)
 		if (neg and (b1 ~= 0xFF or b2 < 0xE0)) or (not neg and (b1 ~= 0 or b2 >= 0x20)) then
-			fail("an int further than 2^53 - 1 from 0")
+			fail(what .. " further than 2^53 - 1 from 0")
 		end
 	end
 	if not neg then
@@ -61,7 +63,7 @@ local function int(s, i, n, signed)
 	end
 	v = -v - 1
 	if v < -M.MAX_INT then -- -2^53, which the first bits let through
-		fail("an int further than 2^53 - 1 from 0")
+		fail(what .. " further than 2^53 - 1 from 0")
 	end
 	return v
 end
@@ -94,7 +96,9 @@ local function float(s, i, n)
 	return v
 end
 
--- Extension -1, a timestamp in n bytes at i: { sec, nsec }.
+-- Extension -1, a timestamp in n bytes at i: { sec, nsec }. Its seconds are
+-- an int, at most MAX_INT from 1970 (in 12 bytes; fewer cannot pass it), and
+-- its nanoseconds under a second.
 local function timestamp(s, i, n)
 	local sec, nsec
 	if n == 4 then
@@ -103,7 +107,7 @@ local function timestamp(s, i, n)
 		local hi = uint(s, i, 4) -- 30 bits of nanoseconds, then the seconds' top 2
 		sec, nsec = (hi % 4) * 2 ^ 32 + uint(s, i + 4, 4), floor(hi / 4)
 	elseif n == 12 then
-		sec, nsec = int(s, i + 4, 8, true), uint(s, i, 4)
+		sec, nsec = int(s, i + 4, 8, true, "a timestamp's seconds"), uint(s, i, 4)
 	else
 		fail(format("a timestamp of %d bytes", n))
 	end
@@ -113,7 +117,8 @@ local function timestamp(s, i, n)
 	return { sec = sec, nsec = nsec }
 end
 
--- An extension of n bytes at i, after its type: a timestamp, or nil.
+-- An extension of n bytes at i, after its type: a timestamp, or nil for any
+-- other type, which is absent.
 local function ext(s, i, n)
 	need(s, i, n + 1)
 	if byte(s, i) == 0xFF then
@@ -148,7 +153,7 @@ local function array(s, i, n, depth, floats)
 	for k = 1, n do
 		local v, is_float
 		v, i, is_float = read(s, i, depth + 1, floats)
-		t[k] = v -- a nil leaves a hole
+		t[k] = v -- an absent extension leaves a hole
 		if is_float then
 			marks = marks or {}
 			marks[k] = true
@@ -160,17 +165,23 @@ local function array(s, i, n, depth, floats)
 	return t, i
 end
 
+-- Whether c starts a str: fixstr, or str 8, 16 or 32.
+local function is_str(c)
+	return (c >= 0xA0 and c < 0xC0) or (c >= 0xD9 and c <= 0xDB)
+end
+
 local function map(s, i, n, depth, floats)
 	enter(s, i, n, depth, 2)
 	local t, marks = {}, nil
 	for _ = 1, n do
+		local c = byte(s, i)
+		if c and not is_str(c) then -- no byte at all is cut short, which read says
+			fail("a map key that is not a str")
+		end
 		local k, v, is_float
 		k, i = read(s, i, depth + 1, floats)
-		if k == nil or k ~= k or type(k) == "table" then
-			fail("a map key that cannot key a table")
-		end
 		v, i, is_float = read(s, i, depth + 1, floats)
-		t[k] = v -- a nil leaves the key out
+		t[k] = v -- an absent extension leaves the key out, even one given before
 		if is_float then
 			marks = marks or {}
 			marks[k] = true
@@ -222,7 +233,7 @@ read = function(s, i, depth, floats)
 	elseif c >= 0xE0 then
 		return c - 0x100, i
 	elseif c == 0xC0 then
-		return nil, i
+		fail("a nil")
 	elseif c == 0xC2 or c == 0xC3 then
 		return c == 0xC3, i
 	elseif c == 0xCA or c == 0xCB then
@@ -254,8 +265,8 @@ end
 
 --- The one value s holds, and its floats: a table whose keys are the tables
 --- of the value, floats[t][k] true where t[k] was a float. nil and an error
---- ("msgpack: …") when s is not one value: docs/plx.md has the whole
---- contract.
+--- ("msgpack: …") when s is not one value, which a nil or a map key that is
+--- not a str anywhere in it makes it: docs/plx.md has the whole contract.
 function M.decode(s)
 	if type(s) ~= "string" then
 		return nil, "msgpack: not a string"

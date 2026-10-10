@@ -202,10 +202,7 @@ test("msgpack: floats of 32 and 64 bits", function()
 	ok(nan ~= nan, "NaN")
 end)
 
-test("msgpack: nil, booleans, strings and bins in every form", function()
-	local v, floats = msgpack.decode(hex("c0"))
-	eq(v, nil, "nil")
-	eq(type(floats), "table", "nil decodes")
+test("msgpack: booleans, strings and bins in every form", function()
 	eq(one("c2"), false)
 	eq(one("c3"), true)
 	eq(one("a0"), "")
@@ -234,23 +231,22 @@ test("msgpack: arrays and maps in every form", function()
 	end
 	eq(next((one("90"))), nil, "[]")
 	eq(next((one("80"))), nil, "{}")
-	local v = one("84 01 a1 61 c3 02 cb 3ff8000000000000 03 c4 01 62 04")
-	eq(v[1], "a", "an int key")
-	eq(v[true], 2, "a boolean key")
-	eq(v[1.5], 3, "a float key")
-	eq(v.b, 4, "a bin key is a string")
+	for _, h in ipairs({ "81 a1 61 01", "81 d9 01 61 01", "81 da 0001 61 01", "81 db 00000001 61 01" }) do
+		eq(one(h).a, 1, h .. ": a key in each form of a str")
+	end
+	eq(one("81 a0 01")[""], 1, "the empty str")
+	local v = one("82 a1 62 01 a1 62 02")
 	ok(getmetatable(v) == nil, "no metatable")
-	v = one("83 a1 61 c0 a1 62 01 a1 62 02")
-	eq(count(v), 1, "a nil value leaves its key out")
+	eq(count(v), 1)
 	eq(v.b, 2, "a key twice: the last value")
 end)
 
 test("msgpack: an array keeps no length of its own", function()
-	local v = one("93 01 c0 03")
+	local v = one("93 01 d4 05 00 03")
 	eq(v[1], 1)
 	eq(v[2], nil, "a hole")
 	eq(v[3], 3)
-	eq(next((one("92 c0 c0"))), nil, "nothing but nil")
+	eq(next((one("92 d4 05 00 c7 00 05"))), nil, "nothing but absent extensions")
 end)
 
 test("msgpack: a timestamp in 4, 8 or 12 bytes; any other extension is absent", function()
@@ -269,7 +265,13 @@ test("msgpack: a timestamp in 4, 8 or 12 bytes; any other extension is absent", 
 	fails("c7 03 ff 000000", "a timestamp of 3 bytes")
 	fails("d8 ff 00000000000000000000000000000000", "a timestamp of 16 bytes")
 	fails("d7 ff ee6b2800 00000000", "a second of nanoseconds")
+	ts("c7 0c ff 00000000 ffe0000000000001", -(2 ^ 53 - 1), 0)
 	fails("c7 0c ff 00000000 0020000000000000", "seconds past 2^53 - 1")
+	fails("c7 0c ff 00000000 ffe0000000000000", "seconds of -2^53")
+	fails("c7 0c ff 00000000 7fffffffffffffff", "seconds of 2^63 - 1")
+	fails("81 a1 61 c7 0c ff 00000000 0020000000000000", "seconds past 2^53 - 1, in a map")
+	local _, err = msgpack.decode(hex("c7 0c ff 00000000 0020000000000000"))
+	ok(err:find("timestamp", 1, true), "says so: " .. err)
 	for _, h in ipairs({
 		"d4 01 00",
 		"d5 01 0000",
@@ -285,7 +287,17 @@ test("msgpack: a timestamp in 4, 8 or 12 bytes; any other extension is absent", 
 		local v = one("82 a1 61 " .. h .. " a1 62 01")
 		eq(count(v), 1, h .. " in a map")
 		eq(v.b, 1)
+		v = one("93 01 " .. h .. " 03")
+		eq(count(v), 2, h .. " in an array")
+		eq(v[1], 1)
+		eq(v[2], nil, "a hole")
+		eq(v[3], 3)
 	end
+	local v, floats = one("82 a1 61 cb 3ff8000000000000 a1 61 d4 05 00")
+	eq(next(v), nil, "an absent last value leaves out a key given before")
+	eq(next(floats), nil, "and its mark")
+	eq(one("c7 01 05 c0"), nil, "an extension's data is not read: no nil there")
+	eq(one("91 c7 02 05 81 01")[1], nil, "nor a key")
 end)
 
 test("msgpack: floats marks the floats of each table", function()
@@ -336,13 +348,39 @@ test("msgpack: what is not one value", function()
 	ok(v == nil and err:sub(1, 9) == "msgpack: ", "not a string")
 end)
 
-test("msgpack: a map key that cannot key a table", function()
-	fails("81 c0 01", "nil")
+test("msgpack: nil is not one value, anywhere", function()
+	fails("c0", "alone")
+	fails("91 c0", "in an array")
+	fails("93 01 c0 03", "inside an array")
+	fails("81 a1 61 c0", "a map's value")
+	fails("81 c0 01", "a map's key")
+	fails("81 a1 61 81 a1 62 91 c0", "deep")
+	fails("82 a1 61 c0 a1 61 01", "in a value a key given again replaces")
+	fails("82 a1 61 d4 05 00 a1 62 c0", "after an absent extension")
+end)
+
+test("msgpack: a map key that is not a str", function()
+	fails("81 01 01", "an int")
+	fails("81 ff 01", "a negative int")
+	fails("81 cc ff 01", "a uint 8")
+	fails("81 cb 3ff8000000000000 01", "a float")
 	fails("81 cb 7ff8000000000000 01", "NaN")
+	fails("81 c3 01", "true")
+	fails("81 c2 01", "false")
+	fails("81 c4 01 61 01", "a bin")
+	fails("81 c0 01", "nil")
 	fails("81 90 01", "an array")
 	fails("81 80 01", "a map")
 	fails("81 d6ff00000000 01", "a timestamp")
-	fails("81 d4 01 00 01", "an extension, which is absent")
+	fails("81 d4 01 00 01", "an extension no one defines")
+	fails("82 a1 61 01 01 01", "after a str")
+	fails("81 a1 61 81 01 01", "in a nested map")
+	fails("91 81 01 01", "in a map in an array")
+	fails("82 a1 61 81 01 01 a1 61 01", "in a value a key given again replaces")
+	local _, err = msgpack.decode(hex("81 01 01"))
+	eq(err, "msgpack: a map key that is not a str")
+	_, err = msgpack.decode(hex("81"))
+	eq(err, "msgpack: cut short", "no key at all")
 end)
 
 test("msgpack: a str is UTF-8, a bin any bytes", function()
@@ -416,23 +454,48 @@ test("area: four ints, in a map; another kind's detail is not read", function()
 	eq(next(ev("zoom", mp.pack({ value = "v" })).detail), nil)
 end)
 
--- A Lua table does not say whether it was an array or a map, and holds no
--- nil: where typed reading cannot tell (docs/plx.md).
+-- A nil or a key that is not a str, anywhere, and the body does not decode
+-- (SPEC §3.3): msgpack.decode fails it.
+test("bodies: a nil or a key that is not a str, in any field", function()
+	eq(ev("click", mp.pack({ value = mp.NIL, href = "#x" })):link(), nil, "nil in a known field")
+	eq(
+		ev("click", mp.pack({ href = "#x", future = { 1, mp.NIL } })):link(),
+		nil,
+		"nil in a field the SDK does not know"
+	)
+	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 92 a1 61 c0")), nil, "nil at an array's end")
+	eq(caps(hex("82 a1 76 a3 302e32 01 02")), nil, "a key that is not a str where fields are read")
+	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 81 01 a1 61")), nil, "a map keyed 1 to n for an array")
+	eq(
+		caps(hex("82 a1 76 a3 302e32 a6 667574757265 81 c4 01 78 a1 61")),
+		nil,
+		"a bin key in a field the SDK does not know"
+	)
+end)
+
+-- A Lua table does not say whether it was an array or a map, and an
+-- extension no one defines is absent: where typed reading cannot tell
+-- (docs/plx.md).
 test("typed reading: what a table cannot tell", function()
 	local c = caps(hex("82 a1 76 a3 302e32 a3 6f7073 80"))
 	ok(c and #c.ops == 0, "an empty map for an array")
 	eq(caps(hex("82 a1 76 a3 302e32 a6 6c696d697473 90")).v, "0.2", "an empty array for a map")
-	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 81 01 a1 61")).ops[1], "a", "a map keyed 1 to n for an array")
-	eq(ev("click", mp.pack({ value = mp.NIL, href = "#x" })):link(), "#x", "nil in a known field: absent")
-	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 92 a1 61 c0")).ops[1], "a", "nil at an array's end")
-	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 93 a1 61 c0 a1 62")), nil, "nil inside an array")
+	c = caps(hex("82 a1 76 a3 302e32 a4 63656c6c d6 ff 00000001"))
+	ok(c and c.cell == nil, "a timestamp for a map: one with neither w nor h")
+	eq(caps(hex("82 a1 76 a3 302e32 a6 6c696d697473 d6 ff 00000001")).limits.sec, 1, "or a map of ints")
+	eq(
+		ev("click", hex("82 a4 68726566 a2 2378 a5 76616c7565 d4 05 00")):link(),
+		"#x",
+		"an extension in a known field: left out"
+	)
+	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 92 a1 61 d4 05 00")).ops[1], "a", "an extension at an array's end")
+	eq(caps(hex("82 a1 76 a3 302e32 a3 6f7073 93 a1 61 d4 05 00 a1 62")), nil, "an extension before an element")
 	eq(caps(hex("82 a1 76 a3 302e32 a4 63656c6c 92 09 12")), nil, "a non-empty array for a map")
-	eq(caps(hex("82 a1 76 a3 302e32 01 02")), nil, "a key that is not a str where fields are read")
 	eq(caps(hex("92 a1 76 a3 302e32")), nil, "an array for the body")
 end)
 
 test("caps: from a body's bytes, as plx relays them; scroll is a bool", function()
-	local c = hotty.caps(mp.pack({ v = "0.2", scale = mp.float(2), cell = { w = 18, h = 36 }, future = { 1, mp.NIL } }))
+	local c = hotty.caps(mp.pack({ v = "0.2", scale = mp.float(2), cell = { w = 18, h = 36 }, future = { 1, "x" } }))
 	eq(c.v, "0.2")
 	eq(c.scale, 2)
 	local w = c:cell_css()
@@ -737,7 +800,13 @@ test("errors: a reply's error names its code and detail", function()
 end)
 
 test("messages: an err with a body that does not decode has no code", function()
-	for _, body in ipairs({ "oops", mp.pack({ code = 22 }), mp.pack({ code = "EINVAL", detail = mp.NIL }) .. "\0" }) do
+	for _, body in ipairs({
+		"oops",
+		mp.pack({ code = 22 }),
+		mp.pack({ code = "EINVAL", detail = mp.NIL }),
+		mp.pack({ code = "EINVAL", [1] = "x" }),
+		mp.pack({ code = "EINVAL", detail = "x" }) .. "\0",
+	}) do
 		local _, m = hotty.decoder():feed(hotty.encode({ { "a", "err" }, { "re", "doc" } }, body))
 		local r = m:reply()
 		eq(r.ok, false)
