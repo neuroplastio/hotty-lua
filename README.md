@@ -56,7 +56,7 @@ an error.
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
-| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:program(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `SCROLL_ACTIONS`, `INSERT` |
+| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
 | messages (§3.9) | `msg:reply()`, `msg:event()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`; `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:light()`, `:cell_css()` |
 
 Where Lua differs:
@@ -86,26 +86,34 @@ Where Lua differs:
 
 ## A field in cells
 
-`hotty.field(opts)` is SDK.md §4.6's Field: a text field's value and caret,
-edited as a host edits one on a surface, for a program that draws its
-fields in cells. With the same keymap on both sides, a field edits the same
-in cells and on a surface:
+`hotty.field(opts)` is SDK.md §4.6's Field: a text field's value, caret and
+selection, edited as a host edits one on a surface, for a program that
+draws its fields in cells. With the same keymap on both sides, a field
+edits the same in cells and on a surface, Shift selecting with a move:
 
 ```lua
 local km = hotty.resolve(false, hotty.TERMINAL_KEYS) -- and data-keys="…" on the surface's root
-local f = hotty.field({ value = "foo bar" }) -- opts: value, caret, multiline, password, rows
+local f = hotty.field({ value = "foo bar" }) -- opts: value, caret, anchor, multiline, password, rows
 for _, key in ipairs(hotty.decode_keys(input)) do
 	local action = key and km:lookup(key)
 	if action == hotty.INSERT then
-		f:type(key == "Space" and " " or key)
+		f:type(key == "Space" and " " or key) -- in place of the selection
+	elseif action and km:selects(key) then
+		f:extend(action) -- Shift+ArrowLeft, Control+Shift+End: the caret moves, the anchor stays
 	elseif action and action ~= "submit" then
 		f:do_action(action) -- true when the value changed
 	end
 end
+local from, to = f:selection() -- equal when nothing is selected
 ```
 
 **`do` is a keyword**, so the Field's Do is `do_action`; `f["do"]` is the
 same function.
+
+**The selection** runs from `f.anchor`, the end where it began, to the
+caret: nothing is selected when the anchor is `nil` or at the caret.
+`f:select(anchor, caret)` sets both, for a selection made with the pointer,
+and `f:select(p, p)` puts the caret at `p` with nothing selected.
 
 ## Neovim
 

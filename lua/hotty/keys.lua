@@ -37,6 +37,7 @@ M.ACTIONS = {
 	"page-down",
 	"input-start",
 	"input-end",
+	"select-all",
 	"newline",
 	"submit",
 	"program",
@@ -62,9 +63,23 @@ M.MULTILINE_ACTIONS = {
 	["line-next"] = true,
 	["page-up"] = true,
 	["page-down"] = true,
+	["newline"] = true,
+}
+
+-- The moves, which select with Shift (SPEC §10.2).
+M.MOVES = {
+	["char-backward"] = true,
+	["char-forward"] = true,
+	["word-backward"] = true,
+	["word-forward"] = true,
+	["line-start"] = true,
+	["line-end"] = true,
+	["line-previous"] = true,
+	["line-next"] = true,
+	["page-up"] = true,
+	["page-down"] = true,
 	["input-start"] = true,
 	["input-end"] = true,
-	["newline"] = true,
 }
 
 -- The scroll actions (SPEC §10.2, scrolling keys), which a text field's
@@ -79,12 +94,14 @@ end
 -- What lookup returns for a character the field types.
 M.INSERT = "insert"
 
--- The SDK's keymap (SDK.md §3.10): Bubble Tea's text input and text area.
+-- The SDK's keymap (SDK.md §3.10): Bubble Tea's text input and text area,
+-- but Control+a selects all, as in a GUI field (Home still goes to the
+-- line's start).
 M.TERMINAL_KEYS = concat({
 	"ArrowLeft=char-backward Control+b=char-backward ArrowRight=char-forward Control+f=char-forward",
 	"Alt+ArrowLeft=word-backward Control+ArrowLeft=word-backward Alt+b=word-backward",
 	"Alt+ArrowRight=word-forward Control+ArrowRight=word-forward Alt+f=word-forward",
-	"Home=line-start Control+a=line-start End=line-end Control+e=line-end",
+	"Home=line-start End=line-end Control+e=line-end",
 	"Backspace=delete-char-backward Control+h=delete-char-backward",
 	"Delete=delete-char-forward Control+d=delete-char-forward",
 	"Alt+Backspace=delete-word-backward Control+w=delete-word-backward Control+Backspace=delete-word-backward",
@@ -93,6 +110,7 @@ M.TERMINAL_KEYS = concat({
 	"ArrowUp=line-previous Control+p=line-previous ArrowDown=line-next Control+n=line-next",
 	"PageUp=page-up PageDown=page-down",
 	"Alt+<=input-start Control+Home=input-start Alt+>=input-end Control+End=input-end",
+	"Control+a=select-all",
 	"Control+m=newline",
 }, " ")
 
@@ -633,6 +651,19 @@ function Keymap:lookup(key)
 	return nil
 end
 
+--- Whether the field selects with a key (SDK.md §3.10, SPEC §10.2, Shift
+--- selects): lookup returns a move for it, and its canonical name has
+--- Shift (Shift+ArrowLeft, Control+Shift+End, not Alt+<). The field then
+--- does the move with extend.
+function Keymap:selects(key)
+	local k = M.parse_key(key)
+	if not k then
+		return false
+	end
+	local a = self:lookup(k)
+	return a ~= nil and M.MOVES[a] == true and split_key(k).Shift == true
+end
+
 --- Whether the keymap gives a key to the program (SDK.md §3.10): it binds
 --- the key to program, or, for a key with Shift it does not bind, the key
 --- without Shift. On an element that is not a text field, a host asks it of
@@ -679,22 +710,33 @@ function M.parse_keymap(value)
 	return m
 end
 
---- A field's keymap: SPEC §10.2's default, then each data-keys value, the
---- root's first. A binding to a scroll action is left out where it stands,
---- in its own value too: it neither acts nor overrides an earlier binding of
---- its key.
+--- A field's keymap: SPEC §10.2's default, a browser field's keys, then
+--- each data-keys value, the root's first. A binding to a scroll action is
+--- left out where it stands, in its own value too: it neither acts nor
+--- overrides an earlier binding of its key.
 function M.resolve(multiline, ...)
 	local m = M.keymap(multiline)
 	m:bind("ArrowLeft", "char-backward")
 	m:bind("ArrowRight", "char-forward")
+	m:bind("Control+ArrowLeft", "word-backward")
+	m:bind("Control+ArrowRight", "word-forward")
+	m:bind("Alt+ArrowLeft", "word-backward")
+	m:bind("Alt+ArrowRight", "word-forward")
 	m:bind("Home", "line-start")
 	m:bind("End", "line-end")
+	m:bind("Control+Home", "input-start")
+	m:bind("Control+End", "input-end")
 	m:bind("Backspace", "delete-char-backward")
 	m:bind("Delete", "delete-char-forward")
+	m:bind("Control+Backspace", "delete-word-backward")
+	m:bind("Control+Delete", "delete-word-forward")
+	m:bind("Alt+Backspace", "delete-word-backward")
+	m:bind("Alt+Delete", "delete-word-forward")
 	m:bind("ArrowUp", "line-previous")
 	m:bind("ArrowDown", "line-next")
 	m:bind("PageUp", "page-up")
 	m:bind("PageDown", "page-down")
+	m:bind("Control+a", "select-all")
 	m:bind("Enter", multiline and "newline" or "submit")
 	local function bind(key, action)
 		if not M.SCROLL_ACTIONS[action] then

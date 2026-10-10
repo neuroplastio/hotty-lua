@@ -1,13 +1,16 @@
---- A text field's value and caret, edited by SPEC §10.2's actions, for a
---- program that draws its fields in cells (SDK.md §4.6). hotty.field makes
---- one:
+--- A text field's value, caret and selection, edited by SPEC §10.2's
+--- actions, for a program that draws its fields in cells (SDK.md §4.6).
+--- hotty.field makes one:
 ---
 ---   local f = hotty.field({ value = "foo bar", multiline = false })
 ---   f:do_action("delete-word-backward") --> true; f.value == "foo "
+---   f:extend("word-backward") --> false; f:selection() == 0, 4
 ---
 --- SDK.md's Do is a keyword in Lua: the method is do_action, and f["do"] is
 --- the same. The caret counts characters, which here are code points, CR LF
---- one (hotty.keys): Lua has no grapheme segmentation.
+--- one (hotty.keys): Lua has no grapheme segmentation. The selection runs
+--- from f.anchor, the end where it began, to the caret; nothing is selected
+--- when the anchor is nil or at the caret.
 local keys = require("hotty.keys")
 
 local join = require("hotty.join")
@@ -18,14 +21,16 @@ local M = {}
 local Field = {}
 Field.__index = Field
 
---- A field. opts: value (""), caret (the end), multiline, password, rows
---- (the rows it shows, for page-up and page-down; 1).
+--- A field. opts: value (""), caret (the end), anchor (nil: nothing
+--- selected), multiline, password, rows (the rows it shows, for page-up and
+--- page-down; 1).
 function M.new(opts)
 	opts = opts or {}
 	local value = opts.value or ""
 	return setmetatable({
 		value = value,
 		caret = opts.caret or #chars(value),
+		anchor = opts.anchor,
 		multiline = opts.multiline and true or false,
 		password = opts.password and true or false,
 		rows = opts.rows or 1,
@@ -152,11 +157,51 @@ local function delete(self, c, a, b)
 	return true
 end
 
-local ROWS = { ["line-previous"] = true, ["line-next"] = true, ["page-up"] = true, ["page-down"] = true }
+-- The selection's start and end in a value of n characters, equal when
+-- nothing is selected.
+local function selection(self, n)
+	local p = math.min(math.max(self.caret, 0), n)
+	local a = self.anchor == nil and p or math.min(math.max(self.anchor, 0), n)
+	return math.min(a, p), math.max(a, p)
+end
 
---- Does an action (SPEC §10.2); returns whether the value changed. submit
---- and program are the program's, and change nothing.
-function Field:do_action(action)
+--- The selection's start and end, equal when nothing is selected, for the
+--- rendition to draw.
+function Field:selection()
+	return selection(self, #chars(self.value))
+end
+
+--- Selects from anchor to caret, for a selection the user makes with the
+--- pointer; select(p, p) puts the caret at p with nothing selected. A run
+--- of row moves ends.
+function Field:select(anchor, caret)
+	self.caret = caret
+	self.anchor = anchor ~= caret and anchor or nil
+	self.goal = nil
+end
+
+local ROWS = { ["line-previous"] = true, ["line-next"] = true, ["page-up"] = true, ["page-down"] = true }
+-- The moves that go back or up, which start from a selection's start.
+local BACK = {
+	["char-backward"] = true,
+	["word-backward"] = true,
+	["line-start"] = true,
+	["line-previous"] = true,
+	["page-up"] = true,
+	["input-start"] = true,
+}
+local DELETES = {
+	["delete-char-backward"] = true,
+	["delete-char-forward"] = true,
+	["delete-word-backward"] = true,
+	["delete-word-forward"] = true,
+	["delete-to-line-start"] = true,
+	["delete-to-line-end"] = true,
+}
+
+-- Does an action, extending the selection when extend; returns whether the
+-- value changed.
+local function act(self, action, extend)
 	local c = chars(self.value)
 	local p = math.min(math.max(self.caret, 0), #c)
 	if not ROWS[action] then
@@ -164,6 +209,30 @@ function Field:do_action(action)
 	end
 	if keys.MULTILINE_ACTIONS[action] and not self.multiline then
 		return false
+	end
+	local lo, hi = selection(self, #c)
+	if action == "select-all" then
+		self.anchor, self.caret = 0, #c
+		return false
+	elseif action == "newline" then
+		return self:type("\n")
+	end
+	if extend then
+		if self.anchor == nil then
+			self.anchor = p
+		end
+	elseif lo < hi and keys.MOVES[action] then
+		self.anchor = nil
+		p = BACK[action] and lo or hi
+		if action == "char-backward" or action == "char-forward" then
+			self.caret = p
+			return false
+		end
+	elseif lo < hi and DELETES[action] then
+		self.anchor = nil
+		return delete(self, c, lo, hi)
+	elseif lo == hi then
+		self.anchor = nil
 	end
 	local _, s, e = line_of(lines_of(self, c), p)
 	local page = math.max(self.rows or 1, 1)
@@ -195,6 +264,9 @@ function Field:do_action(action)
 	end
 	if to then
 		self.caret = to
+		if self.anchor == to then
+			self.anchor = nil
+		end
 		return false
 	end
 	self.caret = p
@@ -210,23 +282,40 @@ function Field:do_action(action)
 		return delete(self, c, s, p)
 	elseif action == "delete-to-line-end" then
 		return delete(self, c, p, e)
-	elseif action == "newline" then
-		return self:type("\n")
 	end
 	return false
 end
+
+--- Does an action (SPEC §10.2); returns whether the value changed. A
+--- selection comes first: a delete deletes it and nothing else, a move
+--- starts from its start going back or up and from its end otherwise, and
+--- ends it (char-backward and char-forward stop there), and select-all
+--- selects the whole value. submit and program are the program's, and
+--- change nothing.
+function Field:do_action(action)
+	return act(self, action, false)
+end
 Field["do"] = Field.do_action
 
---- Types text at the caret; returns whether the value changed.
+--- Does a move as Shift does it (SPEC §10.2, Shift selects): the anchor
+--- stays, or is set where the caret is, and the caret moves from where it
+--- is. An action that is not a move is do_action's.
+function Field:extend(action)
+	return act(self, action, keys.MOVES[action] == true)
+end
+
+--- Types text in place of the selection, or at the caret; returns whether
+--- the value changed.
 function Field:type(s)
 	self.goal = nil
 	if not s or s == "" then
 		return false
 	end
 	local c = chars(self.value)
-	local p = math.min(math.max(self.caret, 0), #c)
-	local before = text(c, 1, p) .. s
-	self.value = before .. text(c, p + 1, #c)
+	local lo, hi = selection(self, #c)
+	self.anchor = nil
+	local before = text(c, 1, lo) .. s
+	self.value = before .. text(c, hi + 1, #c)
 	self.caret = #chars(before)
 	return true
 end

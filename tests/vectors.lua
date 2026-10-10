@@ -661,6 +661,12 @@ local function run_keymap(v)
 			return false, show(key) .. ": " .. show(got) .. ", want " .. show(want)
 		end
 	end
+	for key, want in pairs(v.selects or {}) do
+		local got = m:selects(key)
+		if got ~= want then
+			return false, show(key) .. ": selects " .. show(got) .. ", want " .. show(want)
+		end
+	end
 	return true
 end
 
@@ -669,25 +675,32 @@ local function run_edit(v)
 	local fld = hotty.field({
 		value = f.value,
 		caret = f.caret,
+		anchor = not absent(f.anchor) and f.anchor or nil,
 		multiline = f.multiline == true,
 		password = f.password == true,
 		rows = not absent(f.rows) and f.rows or 1,
 	})
 	for i, st in ipairs(v.steps) do
-		local changed
+		local changed = false
 		if st["do"] ~= nil then
 			changed = fld["do"](fld, st["do"])
+		elseif st.extend ~= nil then
+			changed = fld:extend(st.extend)
+		elseif st.select ~= nil then
+			fld:select(st.select[1], st.select[2])
 		else
 			changed = fld:type(st.type)
 		end
-		local got = { value = fld.value, caret = fld.caret, changed = changed }
-		for _, k in ipairs({ "value", "caret", "changed" }) do
+		-- Nothing selected is an anchor at the caret (SDK.md §4.6).
+		local anchor = fld.anchor == nil and fld.caret or fld.anchor
+		local got = { value = fld.value, caret = fld.caret, anchor = anchor, changed = changed }
+		for _, k in ipairs({ "value", "caret", "anchor", "changed" }) do
 			if st[k] ~= nil and not equal(got[k], st[k]) then
 				return false,
 					"step "
 						.. i
 						.. " ("
-						.. show(st["do"] or st.type)
+						.. show(st["do"] or st.extend or st.select or st.type)
 						.. "): "
 						.. k
 						.. " "
