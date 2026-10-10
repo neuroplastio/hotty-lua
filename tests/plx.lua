@@ -196,13 +196,16 @@ test("no host: text, and nothing sent", function()
 	eq(#sent(ctx), 0)
 end)
 
-test("capabilities that do not decode, or name no version: text", function()
+test("capabilities that do not decode, or name another version or none: text", function()
 	for _, raw in ipairs({
 		"",
 		'{"v":"0.2"}', -- JSON, as plx relayed 0.1's
 		mp.pack({ v = "0.2", scale = 2 }), -- an int for a float
 		mp.pack({ host = "fake" }),
 		mp.pack({ v = "" }),
+		mp.pack({ v = "0.1" }),
+		mp.pack({ v = "0.3" }),
+		mp.pack({ v = "0.2,0.3" }),
 	}) do
 		local s = setup({ raw = raw })
 		eq(s.mode, hotty.TEXT, raw)

@@ -132,8 +132,9 @@ no fences. What plx-script gives it, as agreed:
    host, and only a change (never the start), calls
    `on_hotty_caps(ctx, raw)`, raw nil for none, before the `on_show` it
    causes; it draws no frame itself. The adapter reads `hotty.caps(raw)`
-   and sends its documents again. Capabilities that do not decode, or name
-   no version (`v`), are no host.
+   and sends its documents again. Capabilities that do not decode, or whose
+   `v` is not the version this hotty-lua speaks (`hotty.VERSION`, `"0.2"`),
+   none included, are no host (SPEC §4).
 2. **Sending.** `ctx:hotty_send(s)` writes HOTTY commands (the builders'
    strings) for the script's own surfaces to the instance's output, in
    order with plx's frames and never inside one. The relay prefixes the

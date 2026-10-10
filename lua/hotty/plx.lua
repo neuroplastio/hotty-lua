@@ -111,13 +111,13 @@ end
 
 -- The host is now the one whose capabilities raw is, the body of its reply
 -- to plx's query (msgpack, as the host sent it), or none: so is a host whose
--- capabilities do not decode, or name no version. Without ctx:hotty_send
--- there is no way to reach one.
+-- capabilities do not decode, or name another version than this SDK speaks,
+-- or none (SPEC §4). Without ctx:hotty_send there is no way to reach one.
 function Session:host(raw)
 	local caps
 	if type(self.ctx.hotty_send) == "function" then
 		caps = hotty.caps(raw)
-		if caps and caps.v == "" then
+		if caps and caps.v ~= hotty.VERSION then
 			caps = nil
 		end
 	end

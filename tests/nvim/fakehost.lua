@@ -6,12 +6,13 @@
 --     DECRQM, the background colour; it follows the cursor through CUP and
 --     ESC 7 / ESC 8, so it knows where each placement lands, and an erase in
 --     display (ED 2 or 3) drops every placement, as hottyterm does;
---   - the host (when native): the query, and every command, kept as surfaces
---     and placements, with replies as SPEC §3.6 has them. It lays nothing
---     out: r=auto gets auto_rows;
+--   - the host (when native): the query, answered in the one version it
+--     speaks (version, "0.2") or with EVERSION, and every command, kept as
+--     surfaces and placements, with replies as SPEC §3.6 has them. It lays
+--     nothing out: r=auto gets auto_rows;
 --   - not a host, a multiplexer's pane with no terminal attached: it holds a
 --     query that asks for a late answer (SPEC §4), until another query takes
---     its place, and become_host answers it.
+--     its place, and become_host answers it as the host does.
 --
 -- Strict: a malformed HOTTY message, or a HOTTY command other than the query
 -- sent to a terminal that is not a host, is recorded in problems.
@@ -38,6 +39,7 @@ function M.new(opts)
 	opts = opts or {}
 	return setmetatable({
 		native = opts.native ~= false,
+		version = opts.version or "0.2", -- the one version it speaks
 		caps = opts.caps or DEFAULT_CAPS,
 		auto_rows = opts.auto_rows or 4,
 		scanner = hotty.scanner(),
@@ -50,6 +52,7 @@ function M.new(opts)
 		log = {}, -- every HOTTY command, in order: { a, s, control, payload }
 		queries = 0,
 		held = nil, -- the n of a query held for a late answer
+		held_query = nil, -- its control
 		withdrawn = 0, -- queries that took a held one's place and wanted no answer
 		problems = {},
 	}, Host)
@@ -86,6 +89,38 @@ function Host:answer(m, err, extra)
 	return reply(ctl)
 end
 
+-- Whether v, the versions a query lists, comma-separated, has version
+-- exactly.
+local function lists(v, version)
+	for entry in ((v or "") .. ","):gmatch("([^,]*),") do
+		if entry == version then
+			return true
+		end
+	end
+	return false
+end
+
+-- Answers a query as a host that speaks one version does (SPEC §4): its
+-- capabilities when the query lists that version, whatever else it lists,
+-- and EVERSION, the version as its detail, when it lists another or none;
+-- an error unless q is 2, an ok only when q is 0.
+function Host:query_reply(c)
+	local q = tonumber(c.q or "0") or 0
+	local speaks = lists(c.v, self.version)
+	if q >= 2 or (speaks and q ~= 0) then
+		return ""
+	end
+	local ctl = { { "a", speaks and "ok" or "err" } }
+	if c.n then
+		ctl[#ctl + 1] = { "n", c.n }
+	end
+	ctl[#ctl + 1] = { "re", "q" }
+	if speaks then
+		return reply(ctl, self.caps)
+	end
+	return reply(ctl, mp.pack({ code = "EVERSION", detail = self.version }))
+end
+
 function Host:command(m)
 	local c = m.control
 	local entry = { a = c.a, s = c.s, control = c, payload = m.payload }
@@ -93,6 +128,7 @@ function Host:command(m)
 		if not self.native then
 			-- Any query takes a held one's place (SPEC §4).
 			self.held = c.late == "1" and (c.n or "") or nil
+			self.held_query = self.held and c or nil
 			if c.q == "2" then
 				self.withdrawn = self.withdrawn + 1
 				return ""
@@ -105,7 +141,7 @@ function Host:command(m)
 		end
 		self.queries = self.queries + 1
 		self.log[#self.log + 1] = entry
-		return reply({ { "a", "ok" }, { "n", c.n or "" }, { "re", "q" } }, self.caps)
+		return self:query_reply(c)
 	end
 	if not self.native then
 		self.problems[#self.problems + 1] = "a HOTTY command sent to a terminal that is not a host: a=" .. tostring(c.a)
@@ -236,16 +272,17 @@ function Host:event(surface, kind, target, detail)
 end
 
 --- The terminal becomes a host, as one attaching to a multiplexer's pane
---- does, and returns the late answer to the query it held, if any.
+--- does, and returns the late answer to the query it held, if any: the
+--- reply the host gives that query.
 function Host:become_host()
 	self.native = true
-	local n = self.held
-	self.held = nil
-	if not n then
+	local c = self.held_query
+	self.held, self.held_query = nil, nil
+	if not c then
 		return ""
 	end
-	self.log[#self.log + 1] = { a = "q", control = { a = "q", n = n, late = "1" } }
-	return reply({ { "a", "ok" }, { "n", n }, { "re", "q" } }, self.caps)
+	self.log[#self.log + 1] = { a = "q", control = c }
+	return self:query_reply(c)
 end
 
 --- The host forgets every surface, as a full reset does.

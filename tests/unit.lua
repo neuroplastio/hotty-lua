@@ -917,6 +917,15 @@ test("doc's scroll: the axes as given; nil and 0 send no key", function()
 	eq(control().scroll, nil)
 end)
 
+test("query: the SDK's version, and late after it", function()
+	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.2\27\\\27[c")
+	eq(hotty.query(3, { late = true }), "\27]7279;a=q:n=3:v=0.2:late=1\27\\\27[c")
+	eq(hotty.withdraw_late(), "\27]7279;a=q:q=2\27\\", "no version")
+	local last = hotty.CODES[#hotty.CODES]
+	eq(last, hotty.EVERSION)
+	eq(last, "EVERSION")
+end)
+
 test("sync takes commands as arguments or a list", function()
 	local a, b = hotty.set_text("x", "a", "1"), hotty.set_text("x", "b", "2")
 	eq(hotty.sync(a, b), hotty.sync({ a, b }))
@@ -1100,6 +1109,36 @@ test("detector: start returns the query with its n", function()
 	local d = hotty.detector({ n = 9 })
 	eq(d:start(0), hotty.query(9))
 	eq(d.deadline, 1500)
+end)
+
+test("detector: a reply to the query is a host only in the SDK's version", function()
+	local function reply(ctl, body)
+		local _, m = hotty.decoder():feed(hotty.encode(ctl, body))
+		return m:reply()
+	end
+	for _, r in ipairs({
+		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.3" })),
+		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.2,0.3" })),
+		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "" })),
+		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }),
+		reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }),
+		reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }, "not msgpack"),
+	}) do
+		local d = hotty.detector()
+		d:start(0)
+		eq(d:reply(r, 10), true, "detection's")
+		eq(d.state, hotty.TEXT)
+		eq(d.decided, true)
+		eq(d.done, false, "until the DA1 behind it")
+		eq(d.caps, nil)
+		eq(d.deadline, 310)
+	end
+	local d = hotty.detector({ late = true })
+	d:start(0)
+	d:reply(reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }), 10)
+	eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.2" })), 20), true)
+	eq(d.state, hotty.NATIVE, "with late, a host after the error")
+	eq(d.caps.v, "0.2")
 end)
 
 -- keys, field -------------------------------------------------------------------

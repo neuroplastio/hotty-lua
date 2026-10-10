@@ -575,7 +575,12 @@ local function run_detect(v)
 			end
 		end
 	end
-	if v.caps then
+	-- null: none, as when the terminal is no host the program can use.
+	if v.caps == null then
+		if det.caps then
+			return false, "caps " .. show({ v = det.caps.v }) .. ", want none"
+		end
+	elseif v.caps then
 		if not det.caps then
 			return false, "no caps"
 		end

@@ -161,7 +161,9 @@ session:surface("card", {
 - **The terminal** (`hn.term()`) is one per Neovim. It detects whether the
   terminal is a host, and again when the terminal can have changed: a UI
   attached (`UIEnter`), or a return from suspension (`VimResume`), which
-  left the alternate screen and its surfaces with it. It numbers requests
+  left the alternate screen and its surfaces with it. A host that does not
+  speak `VERSION` answers the query with `EVERSION`, and is text, as no
+  host is (SPEC §4). It numbers requests
   (`term:request(build, cb)`, 3 s) and fences (`term:fence(cb)`, 1 s), and
   hands every message no wait took to the sessions and to `term:listen(fn)`.
 - **A session** (`hn.session(opts)`) holds a plugin's surfaces. A surface's
@@ -240,7 +242,8 @@ end
   calling any the tool had; a script that sets its own afterwards calls
   `session:hotty(ctx, seq)`, `:hotty_caps(ctx, raw)` and `:resize(ctx)`
   from it. `session:attach(ctx)` in `init` reads the host: plx calls
-  `on_hotty_caps` only when it changes.
+  `on_hotty_caps` only when it changes. A host whose capabilities do not
+  decode, or name another version than `VERSION`, is text (SPEC §4).
 - **Layout.** A surface is at `x`, `y` in the tool's cells. The session
   sends the document once and places it, clipped to the tool with a
   placement window, and then only what changed: a placement when it moved,

@@ -248,6 +248,139 @@ test(
 	end
 )
 
+-- What every message no wait took reaches, from the start: T.heard.
+local HEARD = [[
+	T.heard = {}
+	require("hotty.nvim").term():listen(function(m)
+		table.insert(T.heard, m.control.a .. " " .. tostring(m.control.re))
+	end)
+]]
+
+test("a host of another version: its EVERSION is detection's, and the terminal text", function(spawn)
+	local t = spawn({ version = "0.3" })
+	t.lua(HEARD .. SETUP)
+	wait(function()
+		return t.lua("return T.mode") == "text"
+	end, "text")
+	t.lua(CARD)
+	t.settle()
+	eq(t.lua("return T.term.caps"), nil)
+	eq(t.lua("return T.term.detector.done"), true)
+	eq(t.lua("return T.heard"), {}, "the error swallowed")
+	eq(t.lua("return T.errors"), {})
+	eq(#t.host:commands("doc"), 0, "nothing sent to a host it cannot use")
+	eq(t.host.queries, 1)
+	eq(t.host.problems, {})
+	return t
+end)
+
+test("late: a late EVERSION changes nothing, and is detection's", function(spawn)
+	local t = spawn({ native = false, version = "0.3" })
+	t.lua(HEARD .. SETUP:gsub('prefix = "t",', 'prefix = "t", late = true,'))
+	wait(function()
+		return t.lua("return T.mode") == "text"
+	end, "text")
+	t.lua(CARD)
+	t.settle()
+	eq(t.host.held, "1", "the query held")
+	t.send(t.host:become_host())
+	t.settle()
+	eq(t.lua("return T.mode"), "text")
+	eq(t.lua("return T.heard"), {}, "the error swallowed")
+	eq(t.lua("return T.errors"), {})
+	eq(#t.host:commands("doc"), 0)
+	eq(t.host.problems, {})
+	return t
+end)
+
+-- Whether v, marked kind in hotty.msgpack.decode's kinds, is of the type
+-- want, as a host vector's types gives it (conformance/README.md): a field
+-- the type does not name is not checked, and an extension of another type,
+-- absent with its mark, is of none.
+local function typed(v, kind, want, kinds)
+	if want == "int" then
+		return type(v) == "number" and kind == nil
+	elseif want == "float" then
+		return kind == "float"
+	elseif want == "str" then
+		return type(v) == "string" and kind == nil
+	elseif want == "bool" then
+		return type(v) == "boolean"
+	end
+	local array = vim.islist(want)
+	if type(v) ~= "table" or kind ~= (array and "array" or nil) then
+		return false
+	end
+	local marks, keys = kinds[v] or {}, {}
+	for k in pairs(v) do
+		keys[k] = true
+	end
+	for k in pairs(marks) do
+		keys[k] = true
+	end
+	for k in pairs(keys) do
+		local w = array and want[1] or want[k] or want["*"]
+		if w and not typed(v[k], marks[k], w, kinds) then
+			return false
+		end
+	end
+	return true
+end
+
+test("the fake host answers a query as the conformance vectors' hosts do", function()
+	local hotty = require("hotty")
+	local f = assert(io.open(root .. "/tests/vectors.json", "rb"))
+	local data = vim.json.decode(f:read("*a"))
+	f:close()
+	local ran = 0
+	for _, v in ipairs(data.vectors) do
+		local queries = v.requires == nil
+		for _, st in ipairs(v.steps) do
+			queries = queries and st.send ~= nil and st.send.a == "q" and st.payload == nil
+		end
+		if queries then
+			ran = ran + 1
+			local host = fakehost.new()
+			for i, st in ipairs(v.steps) do
+				local what = v.name .. ", step " .. i
+				local ctl = { { "a", "q" } }
+				for k, val in pairs(st.send) do
+					if k ~= "a" then
+						ctl[#ctl + 1] = { k, val }
+					end
+				end
+				local out = host:feed(hotty.encode(ctl))
+				local want = st.reply
+				if want == vim.NIL then
+					eq(out, "", what)
+				elseif want ~= nil then
+					local seg = hotty.scanner():feed(out)[1]
+					local result, m = hotty.decoder():feed(seg and seg.data or "")
+					eq(result, hotty.COMPLETE, what)
+					local r = m:reply()
+					for k, w in pairs(want) do
+						if k == "code" or k == "detail" then
+							eq(r[k], w, what .. ": " .. k)
+						elseif k == "body" or k == "types" then
+							local body, kinds = m:body()
+							eq(r.ok and type(body), "table", what .. ": an ok's body")
+							if k == "types" then
+								eq(typed(body, nil, w, kinds), true, what .. ": types")
+							end
+							for name, field in pairs(k == "body" and w or {}) do
+								eq(body[name], field, what .. ": body." .. name)
+							end
+						else
+							eq(m.control[k], w, what .. ": " .. k)
+						end
+					end
+				end
+			end
+		end
+	end
+	eq(ran, 5, "query vectors run")
+end)
+
 -- Placement -------------------------------------------------------------------
 
 test("a surface below a line: its document once, placed on the row after, room made", function(spawn)
