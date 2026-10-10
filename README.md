@@ -285,8 +285,8 @@ runner fails when the copy differs; `make vectors` updates it.
 
 ## gopher-lua
 
-plx runs scripts in gopher-lua v1.1.2. Three of its limits shape this code,
-and any plx script:
+plx runs scripts in gopher-lua v1.1.2. Its limits shape this code, and any
+plx script:
 
 - **`table.concat` overflows** its fixed-size registry at a few thousand
   strings, so the SDK joins in batches (`hotty.join`).
@@ -296,6 +296,9 @@ and any plx script:
 - **Once `pcall` catches an error, a closure no longer shares its caller's
   locals**: the caller's open upvalues are closed with the error. The SDK
   keeps what it changes in tables.
+- **A multiple assignment assigns as it goes**: in `a, b = a + 1, a`, `b`
+  gets the new `a`. The SDK assigns apart where a value reads a name
+  assigned before it.
 
 ## Licence
 

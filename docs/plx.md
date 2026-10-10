@@ -113,7 +113,7 @@ text mode.
 
 ## gopher-lua, for any script
 
-Three limits of gopher-lua v1.1.2 shaped hotty-lua, and bite any plx
+These limits of gopher-lua v1.1.2 shaped hotty-lua, and bite any plx
 script:
 
 - `table.concat` overflows the fixed-size registry at a few thousand
@@ -132,4 +132,13 @@ inc(); pcall(error, "x"); inc()
 print(c) -- 2 in Lua 5.1 and LuaJIT, 1 in gopher-lua v1.1.2
 ```
 
-The third is a bug to report upstream, or to fix in a fork.
+- A multiple assignment assigns a local before it reads the next value,
+  where Lua evaluates every value first.
+
+```lua
+local a, b = 1, nil
+a, b = a + 1, a
+print(b) -- 1 in Lua 5.1 and LuaJIT, 2 in gopher-lua v1.1.2
+```
+
+The last two are bugs to report upstream, or to fix in a fork.

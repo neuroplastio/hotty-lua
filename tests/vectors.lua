@@ -766,7 +766,7 @@ local function main()
 			else
 				local ok, res, why = pcall(run, v)
 				if not ok then
-					res, why = false, res
+					why, res = res, false
 				end
 				check(section, v.name, res, why)
 			end
