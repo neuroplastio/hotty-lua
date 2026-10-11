@@ -30,6 +30,9 @@ local FEATURES = {
 	["options.unordered"] = true,
 	["doc.scroll"] = true,
 	["event.area"] = true,
+	["event.view"] = true,
+	["caps.views"] = true,
+	["reveal"] = true,
 	["caps.scroll"] = true,
 	["decode.abort-count"] = true,
 	["decode.unterminated"] = true,
@@ -219,6 +222,8 @@ local function build(b)
 		return hotty.remove_attr(a.surface, a.target, a.name, opts)
 	elseif name == "morph_to" then
 		return hotty.morph_to(a.surface, a.target, a.html, opts)
+	elseif name == "reveal" then
+		return hotty.reveal(a.surface, a.target, a.where, opts)
 	elseif name == "res" then
 		return hotty.res(a.id, a.mime, a.data, opts)
 	elseif name == "del_res" then
@@ -352,6 +357,7 @@ local function event_view(e)
 		drag = e:drag(),
 		hover = e:hover(),
 		area = e:area(),
+		view = e:view(),
 	}
 end
 
@@ -373,6 +379,7 @@ local function caps_view(c, want)
 		version = c.version,
 		drags = c:drags(),
 		hovers = c:hovers(),
+		views = c:views(),
 		light = c:light(),
 		cell_css = { w = w, h = h },
 		supports = {},

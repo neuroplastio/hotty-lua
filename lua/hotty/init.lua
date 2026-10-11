@@ -44,6 +44,7 @@ M.EVENT_BLUR = "blur"
 M.EVENT_RESIZE = "resize"
 M.EVENT_FIT = "fit"
 M.EVENT_HOVER = "hover"
+M.EVENT_VIEW = "view"
 M.EVENT_DRAG_START = "dragstart"
 M.EVENT_DRAG = "drag"
 M.EVENT_DRAG_END = "dragend"
@@ -58,6 +59,7 @@ M.EVENTS = {
 	"resize",
 	"fit",
 	"hover",
+	"view",
 	"dragstart",
 	"drag",
 	"dragend",
@@ -86,8 +88,22 @@ M.OP_ATTR = "attr"
 M.OP_UNATTR = "unattr"
 M.OP_TEXT = "text"
 M.OP_VAR = "var"
-M.OPS =
-	{ "morph", "inner", "replace", "append", "prepend", "before", "after", "remove", "attr", "unattr", "text", "var" }
+M.OP_REVEAL = "reveal"
+M.OPS = {
+	"morph",
+	"inner",
+	"replace",
+	"append",
+	"prepend",
+	"before",
+	"after",
+	"remove",
+	"attr",
+	"unattr",
+	"text",
+	"var",
+	"reveal",
+}
 
 -- Quiet levels (SPEC §3.5).
 M.REPLY_ALWAYS = 0
@@ -426,6 +442,13 @@ function M.morph_to(surface, target, html, opts)
 	return M.delta(surface, "morph", target, nil, html, opts)
 end
 
+--- Scrolls the target into view (SPEC §6.1): op=reveal, where "start" or
+--- "end" in the payload, or nil (or "") for as little as brings it into
+--- view.
+function M.reveal(surface, target, where, opts)
+	return M.delta(surface, "reveal", target, nil, where, opts)
+end
+
 --- Sends a resource that documents refer to as cid:<id> (SPEC §7.1).
 --- opts: n, q (default 2).
 function M.res(id, mime, data, opts)
@@ -543,6 +566,7 @@ local DETAIL = {
 	drag = DRAG,
 	dragend = DRAG,
 	hover = { c = "int", r = "int", out = "bool" },
+	view = { ["in"] = { ["*"] = AREA }, ["end"] = "bool" },
 }
 
 local MAX_INT = 2 ^ 53 - 1 -- SPEC §3.3
@@ -870,6 +894,23 @@ function Event:area()
 	return { c = a.c, r = a.r, w = a.w, h = a.h }
 end
 
+--- A view's elements in view and whether the document shows its end (SPEC
+--- §9.5): {areas = {[id] = {c, r, w, h}}, at_end = bool}, from the wire's
+--- in and end, which are Lua keywords. An element whose area lacks a field
+--- is left out. nil when the detail does not decode.
+function Event:view()
+	if self.kind ~= M.EVENT_VIEW or not self._decoded then
+		return nil
+	end
+	local d, areas = self.detail, {}
+	for id, a in pairs(d["in"] or {}) do
+		if a.c ~= nil and a.r ~= nil and a.w ~= nil and a.h ~= nil then
+			areas[id] = { c = a.c, r = a.r, w = a.w, h = a.h }
+		end
+	end
+	return { areas = areas, at_end = d["end"] == true }
+end
+
 local function has(list, v)
 	for _, x in ipairs(list) do
 		if x == v then
@@ -902,6 +943,11 @@ end
 --- Whether the host lists hover. One that lists no events does not.
 function Caps:hovers()
 	return has(self.events, M.EVENT_HOVER)
+end
+
+--- Whether the host lists view. One that lists no events does not.
+function Caps:views()
+	return has(self.events, M.EVENT_VIEW)
 end
 
 --- Whether the terminal's scheme is light.

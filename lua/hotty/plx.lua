@@ -580,6 +580,10 @@ function Surface:morph_to(target, html, opts)
 	return self:send(hotty.morph_to(self.id, target, html, opts))
 end
 
+function Surface:reveal(target, where, opts)
+	return self:send(hotty.reveal(self.id, target, where, opts))
+end
+
 function Surface:focus(target, opts)
 	return self:send(hotty.focus(self.id, target, opts))
 end
