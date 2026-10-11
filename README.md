@@ -89,6 +89,8 @@ Where Lua differs:
   (`opts.compress`, from bytes to zlib bytes), and a host never compresses
   what it sends (SPEC §3.3). The Decoder inflates `o=z` itself, with a
   small inflate in Lua, for a relay or a test that reads a program's output.
+  It stops at the decoder's `max` (`opts.max`, 16 MiB by default), as it
+  stops joining the chunks of a message that would decode past it.
 - **msgpack.** Lua has none either, and a host's bodies are msgpack (SPEC
   §3.3): `hotty.msgpack.decode` reads them, in Lua. `msg:body()` is the
   body it decoded, a map, as a table with no metatable, and its kinds.

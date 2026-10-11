@@ -781,6 +781,68 @@ test("inflate: the edges a native hotty.inflate keeps", function()
 	eq(type(err), "string")
 end)
 
+test("inflate: max", function()
+	local data = bytes(1000, 3)
+	eq(inflate.zlib(stored(data), 1000), data)
+	local out, err = inflate.zlib(stored(data), 999)
+	eq(out, nil, "past max")
+	eq(type(err), "string")
+end)
+
+-- What a peer sends is bounded before it is held: a message by the
+-- decoder's max, after base64 and zlib, and a chunked one as its chunks
+-- come (plexos HOTTY-INFLATE-01).
+test("decoder: max", function()
+	local function deflated(n)
+		return base64.encode(stored(string.rep("\0", n)))
+	end
+	for _, c in ipairs({ { 1000, hotty.INVALID }, { 2000, hotty.COMPLETE }, { 1999, hotty.INVALID } }) do
+		local dec = hotty.decoder({ max = c[1] })
+		eq(dec:feed("\27]7279;a=res:id=x:type=text/plain:o=z;" .. deflated(2000) .. "\27\\"), c[2], "max " .. c[1])
+	end
+	eq(hotty.decoder().max, hotty.DEFAULT_MAX)
+	eq(hotty.decoder({ max = 0 }).max, hotty.DEFAULT_MAX)
+	local dec = hotty.decoder({ max = 4 })
+	eq(dec:feed("\27]7279;a=res:id=x:type=text/plain;" .. base64.encode("abcd") .. "\27\\"), hotty.COMPLETE)
+	eq(dec:feed("\27]7279;a=res:id=x:type=text/plain;" .. base64.encode("abcde") .. "\27\\"), hotty.INVALID)
+	-- A custom inflate is given the max, and what it makes past it is refused.
+	local given
+	dec = hotty.decoder({
+		max = 4,
+		inflate = function(_, max)
+			given = max
+			return "abcde"
+		end,
+	})
+	eq(dec:feed("\27]7279;a=res:id=x:type=text/plain:o=z;" .. base64.encode("z") .. "\27\\"), hotty.INVALID)
+	eq(given, 4)
+end)
+
+test("decoder: a chunked message past max is dropped as it comes, and counted once", function()
+	local dec = hotty.decoder({ max = 1024 })
+	local chunk = string.rep("A", 400) -- 300 bytes each
+	eq(dec:feed("\27]7279;a=res:id=x:type=text/plain:m=1;" .. chunk .. "\27\\"), hotty.PARTIAL)
+	for i = 1, 10 do
+		eq(dec:feed("\27]7279;m=1;" .. chunk .. "\27\\"), hotty.PARTIAL, "chunk " .. i)
+	end
+	eq(dec.invalid, 1)
+	eq(#dec.pending.pieces, 0, "nothing held")
+	eq(dec:feed("\27]7279;m=0;" .. chunk .. "\27\\"), hotty.INVALID)
+	eq(dec.invalid, 1)
+	-- A message after it decodes as usual.
+	local r, m = dec:feed("\27]7279;a=hide:s=x\27\\")
+	eq(r, hotty.COMPLETE)
+	eq(m.control.a, "hide")
+	-- A dropped message that another interrupts is counted once.
+	dec:feed("\27]7279;a=res:id=x:type=text/plain:m=1;" .. string.rep("A", 2000) .. "\27\\")
+	eq(dec:feed("\27]7279;a=hide:s=x\27\\"), hotty.COMPLETE)
+	eq(dec.invalid, 2)
+	-- A malformed one too.
+	dec:feed("\27]7279;a=res:id=x:type=text/plain:m=1;" .. string.rep("A", 2000) .. "\27\\")
+	eq(dec:feed("\27]7279;a b\27\\"), hotty.INVALID)
+	eq(dec.invalid, 4)
+end)
+
 test("decoder: o=z is inflated, and bad zlib is malformed", function()
 	local dec = hotty.decoder()
 	local z = base64.encode(stored("<p>hi</p>"))

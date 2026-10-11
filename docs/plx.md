@@ -42,11 +42,12 @@ that `init.lua` uses what it is given, and pins the edges below.
   at the end whatever the length; nil if a byte outside `A-Za-z0-9+/` is
   left, or the length is one more than a multiple of 4. Bits past the last
   byte are ignored.
-- `hotty.inflate.zlib(s)`: the bytes, or nil and an error: a header that
-  is not deflate (method 8, a window of at most 32 KiB, the check), a preset
-  dictionary, a bad stream, an Adler-32 that does not match, or more than
-  `MAX` bytes out (16 MiB; `init.lua` does not read it). Bytes after the
-  checksum are ignored.
+- `hotty.inflate.zlib(s, max)`: the bytes, or nil and an error: a header
+  that is not deflate (method 8, a window of at most 32 KiB, the check), a
+  preset dictionary, a bad stream, an Adler-32 that does not match, or more
+  than `max` bytes out (`MAX`, 16 MiB, when max is nil; `init.lua` passes
+  the decoder's max and does not read `MAX`). It stops making bytes past
+  max. Bytes after the checksum are ignored.
 - `hotty.msgpack.decode(s)`: the one msgpack value the bytes `s` hold (a
   host's body, SPEC §3.3), and its kinds: `value, kinds`. Or `nil` and an
   error, a string that starts with `msgpack: `, when `s` is not one value

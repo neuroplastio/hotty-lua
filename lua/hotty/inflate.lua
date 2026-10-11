@@ -8,7 +8,8 @@ local join = require("hotty.join")
 
 local M = {}
 
--- The most bytes inflate makes, so that a small payload cannot exhaust memory.
+-- The most bytes inflate makes when it is given no max, so that a small
+-- payload cannot exhaust memory.
 M.MAX = 16 * 1024 * 1024
 
 local pow2 = {}
@@ -157,7 +158,7 @@ local function codes(st, lit, dist)
 		local sym = decode(st, lit)
 		if sym < 256 then
 			local n = st.n + 1
-			if n > M.MAX then
+			if n > st.max then
 				error("inflate: too large", 0)
 			end
 			out[n] = sym
@@ -179,7 +180,7 @@ local function codes(st, lit, dist)
 			if d > n then
 				error("inflate: distance too far back", 0)
 			end
-			if n + len > M.MAX then
+			if n + len > st.max then
 				error("inflate: too large", 0)
 			end
 			for i = 1, len do
@@ -204,7 +205,7 @@ local function stored(st)
 	if st.pos + len - 1 > #st.src then
 		error("inflate: unexpected end", 0)
 	end
-	if st.n + len > M.MAX then
+	if st.n + len > st.max then
 		error("inflate: too large", 0)
 	end
 	local out, n = st.out, st.n
@@ -306,10 +307,10 @@ local function to_string(out, n)
 	return join(parts, k)
 end
 
---- The bytes a raw DEFLATE stream holds from byte pos, and the position
---- after it. Errors are raised.
-local function raw(src, pos)
-	local st = { src = src, pos = pos or 1, buf = 0, cnt = 0, out = {}, n = 0 }
+--- The bytes a raw DEFLATE stream holds from byte pos, at most max, and the
+--- position after it. Errors are raised.
+local function raw(src, pos, max)
+	local st = { src = src, pos = pos or 1, buf = 0, cnt = 0, out = {}, n = 0, max = max }
 	repeat
 		local last = bits(st, 1)
 		local kind = bits(st, 2)
@@ -344,8 +345,9 @@ local function adler32(s)
 end
 
 --- The bytes zlib data holds, or nil and an error: a bad header, a bad
---- stream, a checksum that does not match, or more than M.MAX bytes.
-function M.zlib(src)
+--- stream, a checksum that does not match, or more than max bytes (M.MAX
+--- when nil).
+function M.zlib(src, max)
 	local cmf, flg = byte(src, 1, 2)
 	if not flg or cmf % 16 ~= 8 or floor(cmf / 16) > 7 or (cmf * 256 + flg) % 31 ~= 0 then
 		return nil, "inflate: not zlib"
@@ -353,7 +355,7 @@ function M.zlib(src)
 	if floor(flg / 32) % 2 == 1 then
 		return nil, "inflate: a preset dictionary"
 	end
-	local ok, out, pos = pcall(raw, src, 3)
+	local ok, out, pos = pcall(raw, src, 3, max or M.MAX)
 	if not ok then
 		return nil, out
 	end

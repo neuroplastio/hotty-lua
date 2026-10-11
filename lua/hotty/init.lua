@@ -995,31 +995,62 @@ local Decoder = {}
 Decoder.__index = Decoder
 M.Decoder = Decoder
 
+--- A decoder's max when it sets none: 16 MiB, enough for a document with
+--- its images inline, and a bound on what a peer can make a decoder hold.
+M.DEFAULT_MAX = 16 * 1024 * 1024
+
+-- The most base64 a payload of max bytes is sent as: zlib may make it a
+-- little longer than it decodes to.
+local function encoded_max(max)
+	return math.ceil((max + math.floor(max / 256) + 64) / 3) * 4
+end
+
 --- A Decoder turns OSC sequences into messages, one at a time, joining
 --- chunked ones (SPEC §3.4). invalid counts the malformed messages dropped
 --- (SPEC §3.7).
 ---
---- opts.inflate, a function from zlib bytes to bytes (nil when they are not
---- zlib), replaces the inflate built in, for a payload marked o=z.
+--- opts.max is the most bytes a message's payload may decode to, after
+--- base64 and zlib; one that would decode to more is invalid, and its
+--- chunks are not kept (SPEC §3.4 lets a host limit a message). nil or 0 is
+--- M.DEFAULT_MAX. A host sets it to what it accepts from a program, at
+--- least 1 MiB.
+---
+--- opts.inflate, a function from zlib bytes and the max to bytes (nil when
+--- they are not zlib, or more than the max), replaces the inflate built in,
+--- for a payload marked o=z.
 function M.decoder(opts)
-	return setmetatable({ invalid = 0, pending = nil, inflate = opts and opts.inflate or inflate.zlib }, Decoder)
+	local max = opts and opts.max
+	return setmetatable({
+		invalid = 0,
+		pending = nil,
+		max = max and max > 0 and max or M.DEFAULT_MAX,
+		inflate = opts and opts.inflate or inflate.zlib,
+	}, Decoder)
+end
+
+-- Drops the chunked message in progress, counted unless it was already,
+-- when it passed max.
+function Decoder:abort()
+	if self.pending and not self.pending.over then
+		self.invalid = self.invalid + 1
+	end
+	self.pending = nil
 end
 
 function Decoder:bad()
-	if self.pending then
-		self.pending = nil
-		self.invalid = self.invalid + 1
-	end
+	self:abort()
 	self.invalid = self.invalid + 1
 	return M.INVALID, nil
 end
 
+-- A payload that decodes to more than max bytes is refused, and inflating
+-- stops past it.
 function Decoder:finish(values, keys, b64)
-	local payload = base64.decode(b64)
+	local payload = #b64 <= encoded_max(self.max) and base64.decode(b64) or nil
 	if payload and values.o == "z" then
-		payload = self.inflate(payload)
+		payload = self.inflate(payload, self.max)
 	end
-	if not payload then
+	if not payload or #payload > self.max then
 		self.invalid = self.invalid + 1
 		return M.INVALID, nil
 	end
@@ -1068,20 +1099,33 @@ function Decoder:feed(seq)
 			return self:bad()
 		end
 		local p = self.pending
-		p.pieces[#p.pieces + 1] = b64
+		if not p.over and p.size + #b64 > encoded_max(self.max) then
+			-- Too long: counted once, and its chunks dropped as they come.
+			p.pieces, p.over = {}, true
+			self.invalid = self.invalid + 1
+		end
+		if not p.over then
+			p.pieces[#p.pieces + 1] = b64
+			p.size = p.size + #b64
+		end
 		if values.m == "1" then
 			return M.PARTIAL, nil
 		end
 		self.pending = nil
+		if p.over then
+			return M.INVALID, nil
+		end
 		return self:finish(p.values, p.keys, join(p.pieces))
 	end
-	if self.pending then
-		-- Another message before the last chunk aborts the one in progress.
-		self.pending = nil
-		self.invalid = self.invalid + 1
-	end
+	-- Another message before the last chunk aborts the one in progress.
+	self:abort()
 	if values.m == "1" then
-		self.pending = { values = values, keys = keys, pieces = { b64 } }
+		local over = #b64 > encoded_max(self.max)
+		if over then
+			self.invalid = self.invalid + 1
+		end
+		self.pending =
+			{ values = values, keys = keys, pieces = over and {} or { b64 }, size = over and 0 or #b64, over = over }
 		return M.PARTIAL, nil
 	end
 	if values.m ~= nil and values.m ~= "0" then
