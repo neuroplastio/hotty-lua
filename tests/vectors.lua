@@ -106,12 +106,17 @@ local function equal(a, b)
 	return true
 end
 
--- Every key of want matches got: objects recursively, anything else exactly.
+-- Every key of want matches got: objects recursively, anything else exactly,
+-- and a view's areas whole (conformance/README.md, Decode).
 local function match(got, want, path)
 	for k, w in pairs(want) do
 		local g = got[k]
 		local where = path .. "." .. tostring(k)
-		if json.is_object(w) then
+		if k == "areas" and path:sub(-5) == ".view" then
+			if not equal(g, w) then
+				return false, where .. " = " .. show(g) .. ", want " .. show(w)
+			end
+		elseif json.is_object(w) then
 			if type(g) ~= "table" then
 				return false, where .. " = " .. show(g) .. ", want " .. show(w)
 			end
