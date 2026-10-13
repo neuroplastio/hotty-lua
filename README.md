@@ -62,7 +62,7 @@ an error.
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
 | keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(value)`, `resolve(multiline, value…)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
-| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:view()`; `hotty.caps(body)`, `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:views()`, `:light()`, `:cell_css()` |
+| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`; `hotty.caps(body)`, `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:views()`, `:light()`, `:cell_css()` |
 
 Where Lua differs:
 

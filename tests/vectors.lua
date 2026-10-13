@@ -31,6 +31,7 @@ local FEATURES = {
 	["doc.scroll"] = true,
 	["event.area"] = true,
 	["event.view"] = true,
+	["event.count"] = true,
 	["caps.views"] = true,
 	["reveal"] = true,
 	["caps.scroll"] = true,
@@ -363,6 +364,7 @@ local function event_view(e)
 		drag = e:drag(),
 		hover = e:hover(),
 		area = e:area(),
+		count = e:count(),
 		view = e:view(),
 	}
 end
@@ -381,6 +383,7 @@ local function caps_view(c, want)
 		passthrough = c.passthrough,
 		scroll = c.scroll,
 		steps = c.steps,
+		count = c.count,
 		host = c.host,
 		version = c.version,
 		drags = c:drags(),

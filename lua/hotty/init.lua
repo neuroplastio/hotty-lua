@@ -550,12 +550,13 @@ local CAPS = {
 	passthrough = "bool",
 	scroll = "bool",
 	steps = "bool",
+	count = "bool",
 	host = "str",
 	version = "str",
 }
 -- Each kind's detail (SPEC §9); a kind not here carries none the SDK reads.
 local DETAIL = {
-	click = { value = "str", href = "str", url = "str", area = AREA },
+	click = { value = "str", href = "str", url = "str", area = AREA, count = "int" },
 	press = { area = AREA },
 	change = { checked = "bool", value = "str" },
 	input = { value = "str" },
@@ -729,6 +730,7 @@ local function new_caps(d)
 	c.passthrough = d.passthrough == true
 	c.scroll = d.scroll == true
 	c.steps = d.steps == true
+	c.count = d.count == true
 	c.host = d.host
 	c.version = d.version
 	return c
@@ -879,6 +881,17 @@ function Event:hover()
 		return nil
 	end
 	return { c = d.c, r = d.r, out = false }
+end
+
+--- A click's place in its run of clicks on its element, as the user's
+--- platform counts them (SPEC §9): 2 for the second click of a double
+--- click, 1 for a single click or the keyboard's; nil for another kind.
+function Event:count()
+	if self.kind ~= M.EVENT_CLICK then
+		return nil
+	end
+	local n = self.detail.count
+	return type(n) == "number" and n > 1 and n or 1
 end
 
 --- A click's or a press's element, in cells from the surface's top left
