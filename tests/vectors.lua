@@ -35,6 +35,7 @@ local FEATURES = {
 	["reveal"] = true,
 	["caps.scroll"] = true,
 	["decode.abort-count"] = true,
+	["decode.max"] = true,
 	["decode.unterminated"] = true,
 	["scanner.da1"] = true,
 }
@@ -400,7 +401,7 @@ local function caps_view(c, want)
 end
 
 local function run_decode(v)
-	local dec = hotty.decoder()
+	local dec = hotty.decoder({ max = v.max })
 	local results, msgs = {}, {}
 	for i, s in ipairs(v.seqs) do
 		local result, m = dec:feed(s)

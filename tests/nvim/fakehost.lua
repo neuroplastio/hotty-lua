@@ -30,7 +30,8 @@ local DEFAULT_CAPS = mp.pack({
 	cell = { w = 9, h = 18 },
 	scale = mp.float(1),
 	scheme = "dark",
-	limits = { surfaces = 64 },
+	-- message: the limit its decoder keeps (SPEC §13).
+	limits = { surfaces = 64, message = hotty.DEFAULT_MAX },
 	host = "fake",
 	version = "0.0.1",
 })
