@@ -536,7 +536,7 @@ end
 -- of each value of a map keyed by strings. A field not named is not
 -- checked, as one the SDK does not know is ignored (SDK.md §2.7).
 local AREA = { c = "int", r = "int", w = "int", h = "int" }
-local DRAG = { c = "int", r = "int", keys = { "str" }, x = "int", y = "int" }
+local DRAG = { c = "int", r = "int", keys = { "str" }, x = "int", y = "int", tx = "int", ty = "int" }
 local ERROR = { code = "str", detail = "str" }
 local CAPS = {
 	v = "str",
@@ -550,6 +550,7 @@ local CAPS = {
 	passthrough = "bool",
 	scroll = "bool",
 	steps = "bool",
+	drop = "bool",
 	count = "bool",
 	host = "str",
 	version = "str",
@@ -730,6 +731,7 @@ local function new_caps(d)
 	c.passthrough = d.passthrough == true
 	c.scroll = d.scroll == true
 	c.steps = d.steps == true
+	c.drop = d.drop == true
 	c.count = d.count == true
 	c.host = d.host
 	c.version = d.version
@@ -848,9 +850,10 @@ function Event:fit_rows()
 	return self.detail.r
 end
 
---- A drag's cell and the keys held: {c, r, keys}, and its steps x and y
---- for an element with data-steps (SPEC §9.1), each nil when the detail
---- has none; 0 is a step like any other.
+--- A drag's cell and the keys held: {c, r, keys}; its steps x and y for
+--- an element with data-steps, and tx and ty in t, for a t with drop in its
+--- data-on and data-steps (SPEC §9.1), each nil when the detail has none; 0 is a step like any
+--- other.
 function Event:drag()
 	local k = self.kind
 	if k ~= M.EVENT_DRAG_START and k ~= M.EVENT_DRAG and k ~= M.EVENT_DRAG_END then
@@ -864,7 +867,7 @@ function Event:drag()
 	for i, key in ipairs(d.keys or keys) do
 		keys[i] = key
 	end
-	return { c = d.c, r = d.r, keys = keys, x = d.x, y = d.y }
+	return { c = d.c, r = d.r, keys = keys, x = d.x, y = d.y, tx = d.tx, ty = d.ty }
 end
 
 --- A hover's cell, {c, r, out = false}, or {out = true} when the pointer
