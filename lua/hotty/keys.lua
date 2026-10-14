@@ -41,6 +41,7 @@ M.ACTIONS = {
 	"newline",
 	"submit",
 	"program",
+	"copy",
 	"cut",
 	"paste",
 	"undo",
@@ -747,6 +748,8 @@ function M.resolve(multiline, ...)
 	m:bind("Meta+ArrowDown", "input-end")
 	m:bind("Meta+Backspace", "delete-to-line-start")
 	m:bind("Meta+a", "select-all")
+	m:bind("Control+c", "copy")
+	m:bind("Meta+c", "copy")
 	m:bind("Control+x", "cut")
 	m:bind("Meta+x", "cut")
 	m:bind("Control+v", "paste")

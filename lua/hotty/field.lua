@@ -291,8 +291,8 @@ end
 --- starts from its start going back or up and from its end otherwise, and
 --- ends it (char-backward and char-forward stop there), and select-all
 --- selects the whole value. submit and program are the program's, and
---- change nothing, as do cut, paste, undo and redo: a Field keeps no
---- clipboard and no history.
+--- change nothing, as do copy, cut, paste, undo and redo: a Field keeps
+--- no clipboard and no history.
 function Field:do_action(action)
 	return act(self, action, false)
 end
