@@ -1335,6 +1335,20 @@ test("field: a long value", function()
 	eq(f.caret, 3 * 3000 - 2)
 end)
 
+test("caps: merge drops a field a caps event empties (SPEC §9)", function()
+	local c = hotty.caps(mp.pack({
+		mod = "Control",
+		edit = { copy = mp.array({ "Control+c" }) },
+		keys = { leader = "Space", timeout = 2000 },
+	}))
+	local m = c:merge(hotty.caps(mp.pack({ edit = {}, keys = {} })))
+	eq(m.raw.edit, nil, "edit")
+	eq(m.raw.keys, nil, "keys")
+	eq(m.raw.mod, "Control", "mod")
+	eq(m.keys, nil, "Caps.keys")
+	eq(c:merge(hotty.caps(mp.pack({ mod = "Meta" }))).raw.edit ~= nil, true, "edit kept")
+end)
+
 for _, f in ipairs(failures) do
 	print("FAIL " .. f)
 end

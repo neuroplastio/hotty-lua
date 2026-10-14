@@ -1031,14 +1031,21 @@ function Event:changed()
 end
 
 --- These capabilities with the fields a caps event changed in place of
---- their own.
+--- their own, and without those it empties: a field that became absent
+--- comes as an empty map (SPEC §9), edit = {} or keys = {}.
 function Caps:merge(changed)
 	local d = {}
 	for k, v in pairs(self.raw) do
 		d[k] = v
 	end
 	for k, v in pairs(changed.raw) do
-		d[k] = v
+		-- An empty table where the field is a map: its type says which.
+		local t = CAPS[k]
+		if type(v) == "table" and next(v) == nil and type(t) == "table" and t[1] == nil then
+			d[k] = nil
+		else
+			d[k] = v
+		end
 	end
 	return new_caps(d)
 end
