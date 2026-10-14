@@ -41,6 +41,10 @@ M.ACTIONS = {
 	"newline",
 	"submit",
 	"program",
+	"cut",
+	"paste",
+	"undo",
+	"redo",
 	"scroll-up",
 	"scroll-down",
 	"scroll-left",
@@ -743,6 +747,15 @@ function M.resolve(multiline, ...)
 	m:bind("Meta+ArrowDown", "input-end")
 	m:bind("Meta+Backspace", "delete-to-line-start")
 	m:bind("Meta+a", "select-all")
+	m:bind("Control+x", "cut")
+	m:bind("Meta+x", "cut")
+	m:bind("Control+v", "paste")
+	m:bind("Meta+v", "paste")
+	m:bind("Control+z", "undo")
+	m:bind("Meta+z", "undo")
+	m:bind("Control+Z", "redo")
+	m:bind("Control+y", "redo")
+	m:bind("Meta+Z", "redo")
 	m:bind("Enter", multiline and "newline" or "submit")
 	local function bind(key, action)
 		if not M.SCROLL_ACTIONS[action] then
