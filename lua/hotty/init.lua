@@ -48,6 +48,8 @@ M.EVENT_VIEW = "view"
 M.EVENT_DRAG_START = "dragstart"
 M.EVENT_DRAG = "drag"
 M.EVENT_DRAG_END = "dragend"
+M.EVENT_COMMAND = "command" -- an edit command the program takes (SPEC §10.6); no surface
+M.EVENT_CAPS = "caps" -- the capabilities mod, edit or keys changed (SPEC §4); no surface
 M.EVENTS = {
 	"click",
 	"change",
@@ -63,6 +65,8 @@ M.EVENTS = {
 	"dragstart",
 	"drag",
 	"dragend",
+	"command",
+	"caps",
 }
 
 -- Error codes (SPEC §3.6).
@@ -491,6 +495,66 @@ function M.blur(surface, opts)
 	return command({ { "a", "blur" }, { "s", surface } }, nil, M.NO_REPLY, opts)
 end
 
+--- Takes the edit commands named (SPEC §10.6), a list of "select-all",
+--- "copy", "cut", "paste", "undo", "redo": their keys, the host's edit
+--- shortcuts (caps.edit), then reach the program as command events in place
+--- of their bytes. Each replaces the last; none takes nothing. It holds for
+--- the screen it is sent on. opts: n, q (default 2).
+function M.edit(names, opts)
+	return command({ { "a", "edit" }, { "take", table.concat(names or {}, ",") } }, nil, M.NO_REPLY, opts)
+end
+
+-- msgpack for a menu: the smallest form of each str, array and map header.
+local function mp_head(n, fix, fixmax, h8, h16, h32)
+	local char, floor = string.char, math.floor
+	if n <= fixmax then
+		return char(fix + n)
+	elseif h8 and n < 256 then
+		return char(h8, n)
+	elseif n < 65536 then
+		return char(h16, floor(n / 256), n % 256)
+	end
+	return char(h32, floor(n / 16777216) % 256, floor(n / 65536) % 256, floor(n / 256) % 256, n % 256)
+end
+
+local function mp_str(s)
+	return mp_head(#s, 0xa0, 31, 0xd9, 0xda, 0xdb) .. s
+end
+
+--- Shows the which-key menu of a program's key sequence while it waits, or
+--- with nil hides it (SPEC §10.6). level is {seq = {key…}, label, items =
+--- {{key, label, group, enabled}…}}, enabled true when nil; it goes out as
+--- msgpack in myelin's names and order (SDK.md §3.4). opts: n, q (default 2).
+function M.menu(level, opts)
+	if level == nil then
+		return command({ { "a", "menu" } }, nil, M.NO_REPLY, opts)
+	end
+	local seq, items = level.seq or {}, level.items or {}
+	local label = level.label or ""
+	local out = { mp_head(label ~= "" and 3 or 2, 0x80, 15, nil, 0xde, 0xdf), mp_str("seq") }
+	out[#out + 1] = mp_head(#seq, 0x90, 15, nil, 0xdc, 0xdd)
+	for _, k in ipairs(seq) do
+		out[#out + 1] = mp_str(k)
+	end
+	if label ~= "" then
+		out[#out + 1] = mp_str("label") .. mp_str(label)
+	end
+	out[#out + 1] = mp_str("items") .. mp_head(#items, 0x90, 15, nil, 0xdc, 0xdd)
+	for _, it in ipairs(items) do
+		local il = it.label or ""
+		local n = 2 + (il ~= "" and 1 or 0) + (it.group and 1 or 0)
+		out[#out + 1] = mp_head(n, 0x80, 15, nil, 0xde, 0xdf) .. mp_str("key") .. mp_str(it.key)
+		if il ~= "" then
+			out[#out + 1] = mp_str("label") .. mp_str(il)
+		end
+		if it.group then
+			out[#out + 1] = mp_str("group") .. "\195"
+		end
+		out[#out + 1] = mp_str("enabled") .. (it.enabled == false and "\194" or "\195")
+	end
+	return command({ { "a", "menu" } }, table.concat(out), M.NO_REPLY, opts)
+end
+
 --- Commands already built, bracketed in synchronized output, so the host
 --- shows all of them or none (SPEC §6.3). Takes the commands as arguments or
 --- as one list.
@@ -552,6 +616,10 @@ local CAPS = {
 	steps = "bool",
 	drop = "bool",
 	count = "bool",
+	mod = "str",
+	edit = { ["*"] = { "str" } },
+	keys = { leader = "str", timeout = "int" },
+	menu = "bool",
 	host = "str",
 	version = "str",
 }
@@ -569,6 +637,8 @@ local DETAIL = {
 	dragend = DRAG,
 	hover = { c = "int", r = "int", out = "bool" },
 	view = { ["in"] = { ["*"] = AREA }, ["end"] = "bool" },
+	command = { name = "str", key = "str", text = "str" },
+	caps = CAPS,
 }
 
 local MAX_INT = 2 ^ 53 - 1 -- SPEC §3.3
@@ -733,6 +803,10 @@ local function new_caps(d)
 	c.steps = d.steps == true
 	c.drop = d.drop == true
 	c.count = d.count == true
+	c.mod = d.mod
+	c.edit = d.edit
+	c.keys = d.keys and { leader = d.keys.leader, timeout = d.keys.timeout }
+	c.menu = d.menu == true
 	c.host = d.host
 	c.version = d.version
 	return c
@@ -934,6 +1008,39 @@ local function has(list, v)
 		end
 	end
 	return false
+end
+
+--- An edit command's (SPEC §10.6): {name, key, text}, key "" from the
+--- terminal's menu, text nil when a paste carries none; nil for another kind
+--- or a detail with no name.
+function Event:command()
+	local d = self.detail
+	if self.kind ~= M.EVENT_COMMAND or type(d.name) ~= "string" then
+		return nil
+	end
+	return { name = d.name, key = d.key or "", text = d.text }
+end
+
+--- A caps event's capabilities that changed (SPEC §4): a Caps whose raw has
+--- only those fields, for Caps:merge. nil when its detail does not decode.
+function Event:changed()
+	if self.kind ~= M.EVENT_CAPS or not self._decoded then
+		return nil
+	end
+	return new_caps(self.detail)
+end
+
+--- These capabilities with the fields a caps event changed in place of
+--- their own.
+function Caps:merge(changed)
+	local d = {}
+	for k, v in pairs(self.raw) do
+		d[k] = v
+	end
+	for k, v in pairs(changed.raw) do
+		d[k] = v
+	end
+	return new_caps(d)
 end
 
 --- Whether the host supports a delta op; one that lists none supports all.
@@ -1521,6 +1628,8 @@ M.decode_keys = keys.decode_keys
 M.keymap = keys.keymap
 M.parse_keymap = keys.parse_keymap
 M.resolve = keys.resolve
+M.platform_of = keys.platform_of
+M.default_edit = keys.default_edit
 
 -- A field in cells (SDK.md §4.6) --------------------------------------------------
 

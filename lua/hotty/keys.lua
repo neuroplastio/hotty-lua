@@ -100,8 +100,8 @@ end
 M.INSERT = "insert"
 
 -- The SDK's keymap (SDK.md §3.10): Bubble Tea's text input and text area,
--- but Control+a selects all, as in a GUI field (Home still goes to the
--- line's start).
+-- but Mod+a selects all, as in a GUI field: Control+a on Linux, while on
+-- macOS Control+a stays the line's start.
 M.TERMINAL_KEYS = concat({
 	"ArrowLeft=char-backward Control+b=char-backward ArrowRight=char-forward Control+f=char-forward",
 	"Alt+ArrowLeft=word-backward Control+ArrowLeft=word-backward Alt+b=word-backward",
@@ -115,7 +115,7 @@ M.TERMINAL_KEYS = concat({
 	"ArrowUp=line-previous Control+p=line-previous ArrowDown=line-next Control+n=line-next",
 	"PageUp=page-up PageDown=page-down",
 	"Alt+<=input-start Control+Home=input-start Alt+>=input-end Control+End=input-end",
-	"Control+a=select-all",
+	"Mod+a=select-all",
 	"Control+m=newline",
 }, " ")
 
@@ -191,7 +191,10 @@ end
 
 -- Key names (SPEC §10.4) ----------------------------------------------------------
 
-local MODIFIER = { Control = 1, Alt = 2, Meta = 3, Shift = 4 }
+local MODIFIER = { Mod = 0, Control = 1, Alt = 2, Meta = 3, Shift = 4 }
+-- The modifiers in the order a name writes them: a binding's Mod first,
+-- which a keymap reads as its platform's (SPEC §10.4).
+local ORDER = { "Mod", "Control", "Alt", "Meta", "Shift" }
 
 -- s split at each "+", empty pieces kept.
 local function split_plus(s)
@@ -257,7 +260,7 @@ local function key_name(mods, value)
 		end
 	end
 	local out = {}
-	for _, m in ipairs(M.MODIFIERS) do
+	for _, m in ipairs(ORDER) do
 		if (m == "Shift" and shift) or (m ~= "Shift" and mods[m]) then
 			out[#out + 1] = m
 		end
@@ -589,24 +592,44 @@ end
 local Keymap = {}
 Keymap.__index = Keymap
 
---- An empty keymap; multiline says which field it is for, when resolved.
-function M.keymap(multiline)
-	return setmetatable({ keys = {}, actions = {}, multiline = multiline and true or false }, Keymap)
+--- An empty keymap; multiline says which field it is for, when resolved,
+--- and platform ({mod, edit}, or nil) what Mod reads as: Control, or Meta.
+function M.keymap(multiline, platform)
+	local mod = platform and platform.mod == "Meta" and "Meta" or "Control"
+	return setmetatable(
+		{ keys = {}, actions = {}, written = {}, multiline = multiline and true or false, mod = mod },
+		Keymap
+	)
 end
 
---- Binds a key (a canonical name) to an action. A key bound again keeps
---- its place.
-function Keymap:bind(key, action)
-	if not self.actions[key] then
-		self.keys[#self.keys + 1] = key
+-- A canonical key with Mod read as the keymap's.
+function Keymap:read(k)
+	local mods, value = split_key(k)
+	if not mods.Mod then
+		return k
 	end
-	self.actions[key] = action
+	local m = {}
+	for x in pairs(mods) do
+		m[x == "Mod" and self.mod or x] = true
+	end
+	return key_name(m, value)
+end
+
+--- Binds a key (a canonical name, Mod read as the keymap's) to an action.
+--- A key bound again keeps its place, written as its last binding wrote it.
+function Keymap:bind(key, action)
+	local k = self:read(key)
+	if not self.actions[k] then
+		self.keys[#self.keys + 1] = k
+	end
+	self.actions[k] = action
+	self.written[k] = key
 end
 
 --- Binds what other binds, over what this one binds.
 function Keymap:update(other)
 	for _, key in ipairs(other.keys) do
-		self:bind(key, other.actions[key])
+		self:bind(other.written[key] or key, other.actions[key])
 	end
 end
 
@@ -614,7 +637,7 @@ end
 function Keymap:format()
 	local out = {}
 	for i, key in ipairs(self.keys) do
-		out[i] = key .. "=" .. self.actions[key]
+		out[i] = (self.written[key] or key) .. "=" .. self.actions[key]
 	end
 	return concat(out, " ")
 end
@@ -640,6 +663,7 @@ end
 --- types, or nil when the key is not the field's.
 function Keymap:lookup(key)
 	local k = M.parse_key(key)
+	k = k and self:read(k)
 	if not k or FOCUS[k] then
 		return nil
 	end
@@ -665,6 +689,7 @@ function Keymap:selects(key)
 	if not k then
 		return false
 	end
+	k = self:read(k)
 	local a = self:lookup(k)
 	return a ~= nil and M.MOVES[a] == true and split_key(k).Shift == true
 end
@@ -678,7 +703,7 @@ end
 --- the program).
 function Keymap:program(key)
 	local k = M.parse_key(key)
-	return k ~= nil and self:bound(k) == "program"
+	return k ~= nil and self:bound(self:read(k)) == "program"
 end
 
 --- The scroll action the keymap binds a key to, with the same fallback
@@ -687,7 +712,7 @@ end
 --- §10.2, scrolling keys).
 function Keymap:scroll(key)
 	local k = M.parse_key(key)
-	local a = k and self:bound(k)
+	local a = k and self:bound(self:read(k))
 	return M.SCROLL_ACTIONS[a] and a or nil
 end
 
@@ -706,60 +731,111 @@ local function each_binding(value, fn)
 	end
 end
 
---- A data-keys value's bindings, without those a host ignores.
-function M.parse_keymap(value)
-	local m = M.keymap()
+--- A data-keys value's bindings, without those a host ignores, Mod read as
+--- the platform's ({mod, edit}, or nil for Control).
+function M.parse_keymap(platform, value)
+	local m = M.keymap(false, platform)
 	each_binding(value, function(key, action)
 		m:bind(key, action)
 	end)
 	return m
 end
 
---- A field's keymap: SPEC §10.2's default, a browser field's keys, then
---- each data-keys value, the root's first. A binding to a scroll action is
---- left out where it stands, in its own value too: it neither acts nor
---- overrides an earlier binding of its key.
-function M.resolve(multiline, ...)
-	local m = M.keymap(multiline)
-	m:bind("ArrowLeft", "char-backward")
-	m:bind("ArrowRight", "char-forward")
-	m:bind("Control+ArrowLeft", "word-backward")
-	m:bind("Control+ArrowRight", "word-forward")
-	m:bind("Alt+ArrowLeft", "word-backward")
-	m:bind("Alt+ArrowRight", "word-forward")
-	m:bind("Home", "line-start")
-	m:bind("End", "line-end")
-	m:bind("Control+Home", "input-start")
-	m:bind("Control+End", "input-end")
-	m:bind("Backspace", "delete-char-backward")
-	m:bind("Delete", "delete-char-forward")
-	m:bind("Control+Backspace", "delete-word-backward")
-	m:bind("Control+Delete", "delete-word-forward")
-	m:bind("Alt+Backspace", "delete-word-backward")
-	m:bind("Alt+Delete", "delete-word-forward")
-	m:bind("ArrowUp", "line-previous")
-	m:bind("ArrowDown", "line-next")
-	m:bind("PageUp", "page-up")
-	m:bind("PageDown", "page-down")
-	m:bind("Control+a", "select-all")
-	m:bind("Meta+ArrowLeft", "line-start")
-	m:bind("Meta+ArrowRight", "line-end")
-	m:bind("Meta+ArrowUp", "input-start")
-	m:bind("Meta+ArrowDown", "input-end")
-	m:bind("Meta+Backspace", "delete-to-line-start")
-	m:bind("Meta+a", "select-all")
-	m:bind("Control+c", "copy")
-	m:bind("Meta+c", "copy")
-	m:bind("Control+x", "cut")
-	m:bind("Meta+x", "cut")
-	m:bind("Control+v", "paste")
-	m:bind("Meta+v", "paste")
-	m:bind("Control+z", "undo")
-	m:bind("Meta+z", "undo")
-	m:bind("Control+Z", "redo")
-	m:bind("Control+y", "redo")
-	m:bind("Meta+Z", "redo")
+-- The edit actions, in SPEC §10.2's order.
+local EDIT_ACTIONS = { "select-all", "copy", "cut", "paste", "undo", "redo" }
+
+--- The default edit shortcuts for a Mod, "Control" (the default) or "Meta"
+--- (SPEC §10.2): each action to its keys, canonical with Mod read.
+function M.default_edit(mod)
+	local m = mod == "Meta" and "Meta" or "Control"
+	local e = {
+		["select-all"] = { m .. "+a" },
+		copy = { m .. "+c" },
+		cut = { m .. "+x" },
+		paste = { m .. "+v" },
+		undo = { m .. "+z" },
+		redo = { m .. "+Z" },
+	}
+	if m == "Control" then
+		e.redo[2] = "Control+y"
+	end
+	return e
+end
+
+--- The platform of a host's capabilities (SDK.md §3.10): {mod, edit}, the
+--- defaults where it reports none.
+function M.platform_of(caps)
+	return { mod = caps and caps.mod, edit = caps and caps.edit }
+end
+
+-- The default keymap (SPEC §10.2): every host's keys, then those of its Mod.
+local DEFAULT_KEYS = {
+	{ "ArrowLeft", "char-backward" },
+	{ "ArrowRight", "char-forward" },
+	{ "Alt+ArrowLeft", "word-backward" },
+	{ "Alt+ArrowRight", "word-forward" },
+	{ "Home", "line-start" },
+	{ "End", "line-end" },
+	{ "Backspace", "delete-char-backward" },
+	{ "Delete", "delete-char-forward" },
+	{ "Alt+Backspace", "delete-word-backward" },
+	{ "Alt+Delete", "delete-word-forward" },
+	{ "ArrowUp", "line-previous" },
+	{ "ArrowDown", "line-next" },
+	{ "PageUp", "page-up" },
+	{ "PageDown", "page-down" },
+}
+local MOD_KEYS = {
+	Control = {
+		{ "Control+ArrowLeft", "word-backward" },
+		{ "Control+ArrowRight", "word-forward" },
+		{ "Control+Home", "input-start" },
+		{ "Control+End", "input-end" },
+		{ "Control+Backspace", "delete-word-backward" },
+		{ "Control+Delete", "delete-word-forward" },
+	},
+	Meta = {
+		{ "Meta+ArrowLeft", "line-start" },
+		{ "Meta+ArrowRight", "line-end" },
+		{ "Meta+ArrowUp", "input-start" },
+		{ "Meta+ArrowDown", "input-end" },
+		{ "Meta+Backspace", "delete-to-line-start" },
+		{ "Control+a", "line-start" },
+		{ "Control+e", "line-end" },
+		{ "Control+b", "char-backward" },
+		{ "Control+f", "char-forward" },
+		{ "Control+p", "line-previous" },
+		{ "Control+n", "line-next" },
+		{ "Control+h", "delete-char-backward" },
+		{ "Control+d", "delete-char-forward" },
+		{ "Control+k", "delete-to-line-end" },
+	},
+}
+
+--- A field's keymap: SPEC §10.2's default for the platform's Mod, with its
+--- edit shortcuts, then each data-keys value, the root's first. A binding
+--- to a scroll action is left out where it stands, in its own value too: it
+--- neither acts nor overrides an earlier binding of its key. platform is
+--- {mod, edit}, or nil for Control and the default edit shortcuts.
+function M.resolve(platform, multiline, ...)
+	platform = platform or {}
+	local m = M.keymap(multiline, platform)
+	for _, b in ipairs(DEFAULT_KEYS) do
+		m:bind(b[1], b[2])
+	end
 	m:bind("Enter", multiline and "newline" or "submit")
+	for _, b in ipairs(MOD_KEYS[m.mod]) do
+		m:bind(b[1], b[2])
+	end
+	local edit = platform.edit or M.default_edit(m.mod)
+	for _, a in ipairs(EDIT_ACTIONS) do
+		for _, key in ipairs(edit[a] or {}) do
+			local k = M.parse_key(key)
+			if k and not FOCUS[k] then
+				m:bind(k, a)
+			end
+		end
+	end
 	local function bind(key, action)
 		if not M.SCROLL_ACTIONS[action] then
 			m:bind(key, action)

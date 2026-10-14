@@ -246,6 +246,10 @@ local function build(b)
 		return hotty.focus(a.surface, a.target, opts)
 	elseif name == "blur" then
 		return hotty.blur(a.surface, opts)
+	elseif name == "edit" then
+		return hotty.edit(a.names, opts)
+	elseif name == "menu" then
+		return hotty.menu(not absent(a.menu) and a.menu or nil, opts)
 	elseif name == "sync" then
 		local cmds = {}
 		for i, c in ipairs(a.commands) do
@@ -273,8 +277,11 @@ local function run_build(v)
 	local want = {}
 	for i, seg in ipairs(v.out) do
 		if seg.cmd then
-			want[i] =
-				{ cmd = { control = seg.cmd.control, payload = absent(seg.cmd.payload) and "" or seg.cmd.payload } }
+			local payload = absent(seg.cmd.payload) and "" or seg.cmd.payload
+			if not absent(seg.cmd.payload_b64) then
+				payload = hotty.base64.decode(seg.cmd.payload_b64)
+			end
+			want[i] = { cmd = { control = seg.cmd.control, payload = payload } }
 		else
 			want[i] = { raw = seg.raw }
 		end
@@ -350,6 +357,7 @@ local function reply_view(r)
 end
 
 local function event_view(e)
+	local cmd = e:command()
 	local href, url = e:link()
 	local w, h = e:size()
 	return {
@@ -367,6 +375,7 @@ local function event_view(e)
 		area = e:area(),
 		count = e:count(),
 		view = e:view(),
+		command = cmd and { name = cmd.name, key = cmd.key, text = cmd.text or "", has_text = cmd.text ~= nil },
 	}
 end
 
@@ -386,6 +395,10 @@ local function caps_view(c, want)
 		steps = c.steps,
 		drop = c.drop,
 		count = c.count,
+		mod = c.mod,
+		edit = c.edit,
+		keys = c.keys,
+		menu = c.menu,
 		host = c.host,
 		version = c.version,
 		drags = c:drags(),
@@ -447,6 +460,33 @@ local function run_decode(v)
 			local ok, why = match(event_view(e), want.event, "event")
 			if not ok then
 				return ok, why
+			end
+			if want.changed then
+				local ch = e:changed()
+				if not ch then
+					return false, "no changed caps"
+				end
+				local n, w = 0, {}
+				for k in pairs(ch.raw) do
+					n = n + 1
+				end
+				for _, f in ipairs(want.changed.fields) do
+					if ch.raw[f] == nil then
+						return false, "changed lacks " .. f
+					end
+				end
+				if n ~= #want.changed.fields then
+					return false, "changed has " .. n .. " fields"
+				end
+				for k, x in pairs(want.changed) do
+					if k ~= "fields" then
+						w[k] = x
+					end
+				end
+				ok, why = match(caps_view(ch, w), w, "changed")
+				if not ok then
+					return ok, why
+				end
 			end
 		end
 		if want.caps == null then
@@ -655,7 +695,7 @@ end
 local function run_keymap(v)
 	if v.program ~= nil or v.scroll ~= nil then
 		-- An element's keymap outside a text field: no default keymap.
-		local m = hotty.parse_keymap(table.concat(v.keys, " "))
+		local m = hotty.parse_keymap(v.platform, table.concat(v.keys, " "))
 		for key, want in pairs(v.program or {}) do
 			local got = m:program(key)
 			if got ~= want then
@@ -671,7 +711,7 @@ local function run_keymap(v)
 		return true, ""
 	end
 	if v.lookup == nil then
-		local got = hotty.parse_keymap(v.parse ~= nil and v.parse or hotty.TERMINAL_KEYS):format()
+		local got = hotty.parse_keymap(v.platform, v.parse ~= nil and v.parse or hotty.TERMINAL_KEYS):format()
 		return got == v.format, show(got) .. ", want " .. show(v.format)
 	end
 	local layers = {}
@@ -681,7 +721,7 @@ local function run_keymap(v)
 	for _, k in ipairs(v.keys) do
 		layers[#layers + 1] = k
 	end
-	local m = hotty.resolve(v.multiline, unpack(layers))
+	local m = hotty.resolve(v.platform, v.multiline, unpack(layers))
 	for key, want in pairs(v.lookup) do
 		local got = m:lookup(key)
 		if not equal(got, want) then

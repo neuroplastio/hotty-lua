@@ -1262,7 +1262,7 @@ end)
 
 test("keymap: VT does not separate bindings", function()
 	eq(
-		hotty.parse_keymap("Control+a=line-start\vAlt+b=word-backward Alt+f=word-forward"):format(),
+		hotty.parse_keymap(nil, "Control+a=line-start\vAlt+b=word-backward Alt+f=word-forward"):format(),
 		"Alt+f=word-forward"
 	)
 end)
@@ -1274,11 +1274,11 @@ test("decode_keys: a modifier field below 2 is no modifier", function()
 end)
 
 test("keymap: TERMINAL_KEYS reads back as itself", function()
-	eq(hotty.parse_keymap(hotty.TERMINAL_KEYS):format(), hotty.TERMINAL_KEYS)
+	eq(hotty.parse_keymap(nil, hotty.TERMINAL_KEYS):format(), hotty.TERMINAL_KEYS)
 end)
 
 test("keymap: program in a field's keymap, and with a key that does not parse", function()
-	local f = hotty.resolve(false, "ArrowLeft=program")
+	local f = hotty.resolve(nil, false, "ArrowLeft=program")
 	eq(f:program("ArrowLeft"), true)
 	eq(f:lookup("ArrowLeft"), nil, "lookup says as much")
 	eq(f:program("ArrowRight"), false)
@@ -1296,7 +1296,7 @@ test("field: do is do_action", function()
 end)
 
 test("keymap: selects with a key that does not parse, or a character", function()
-	local m = hotty.resolve(true)
+	local m = hotty.resolve(nil, true)
 	eq(m:selects(""), false)
 	eq(m:selects("Hyper+ArrowLeft"), false)
 	eq(m:selects("Shift+a"), false, "A types")
