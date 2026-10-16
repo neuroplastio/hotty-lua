@@ -50,9 +50,9 @@ end
 -- plx's query, msgpack.
 local function caps(surfaces)
 	return mp.pack({
-		v = "0.2",
-		events = { "click", "fit" },
-		cell = { w = 9, h = 18 },
+		v = "0.3",
+		features = { "hover" },
+		cellcss = { w = mp.float(9), h = mp.float(18) },
 		scheme = "dark",
 		limits = { surfaces = surfaces },
 		host = "fake",
@@ -97,7 +97,7 @@ local function new_ctx(raw, cols, rows)
 		if not self.raw then
 			return nil
 		end
-		return { v = "0.2", host = "fake", scheme = "dark", dark = true, raw = self.raw }
+		return { v = "0.3", host = "fake", scheme = "dark", dark = true, raw = self.raw }
 	end
 	function ctx:hotty_send(s)
 		if not self.raw then
@@ -133,6 +133,14 @@ local function sent(ctx)
 	return out
 end
 
+-- A delta's ops, as the host reads them.
+local function ops(cmd)
+	local m = select(2, hotty.decoder():feed(hotty.encode({ { "a", cmd.a }, { "s", cmd.s } }, cmd.payload)))
+	local list, err = hotty.delta_of(m)
+	assert(list, tostring(err))
+	return list
+end
+
 local function actions(cmds)
 	local t = {}
 	for i, c in ipairs(cmds) do
@@ -142,7 +150,11 @@ local function actions(cmds)
 end
 
 local function event(s, kind, target, detail)
-	return hotty.encode({ { "a", "ev" }, { "s", s }, { "e", kind }, { "t", target } }, detail)
+	local ctl = { { "a", "ev" }, { "s", s }, { "e", kind } }
+	if target ~= "" then
+		ctl[#ctl + 1] = { "t", target } -- absent where no element is meant (SPEC §9)
+	end
+	return hotty.encode(ctl, detail)
 end
 
 local function err(re, s, code)
@@ -199,12 +211,13 @@ end)
 test("capabilities that do not decode, or name another version or none: text", function()
 	for _, raw in ipairs({
 		"",
-		'{"v":"0.2"}', -- JSON, as plx relayed 0.1's
-		mp.pack({ v = "0.2", scale = 2 }), -- an int for a float
+		'{"v":"0.3"}', -- JSON, as plx relayed 0.1's
+		mp.pack({ v = "0.3", scale = 2 }), -- an int for a float
+		mp.pack({ v = "0.3", cellcss = { w = 9, h = 18 } }), -- ints for a cell's floats
 		mp.pack({ host = "fake" }),
 		mp.pack({ v = "" }),
 		mp.pack({ v = "0.1" }),
-		mp.pack({ v = "0.3" }),
+		mp.pack({ v = "0.2" }),
 		mp.pack({ v = "0.2,0.3" }),
 	}) do
 		local s = setup({ raw = raw })
@@ -228,7 +241,8 @@ test("a host: the caps whole, then a document and its placement at its cells", f
 		end,
 	})
 	eq(seen.mode, hotty.NATIVE)
-	eq(seen.caps.cell.w, 9)
+	eq(seen.caps.cell_css.w, 9)
+	eq(seen.caps:has("hover"), true)
 	eq(seen.caps.host, "fake")
 	ok(seen.caps.raw.future ~= nil, "unknown fields kept")
 	eq(s.limit, 48)
@@ -251,14 +265,19 @@ test("deltas, under the prefix; only what changed goes out", function()
 	ok(sf:set_text("n", "1"))
 	local cmds = sent(ctx)
 	eq(actions(cmds), "delta app-card")
-	eq(cmds[1].control.op, "text")
-	eq(cmds[1].payload, "1")
+	eq(cmds[1].control.q, "2")
+	eq(ops(cmds[1])[1].op, "text")
+	eq(ops(cmds[1])[1].value, "1")
 	ok(sf:reveal("n", "end"))
 	cmds = sent(ctx)
 	eq(actions(cmds), "delta app-card")
-	eq(cmds[1].control.op, "reveal")
-	eq(cmds[1].control.t, "n")
-	eq(cmds[1].payload, "end")
+	eq(ops(cmds[1])[1].op, "reveal")
+	eq(ops(cmds[1])[1].target, "n")
+	eq(ops(cmds[1])[1].value, "end")
+	ok(sf:delta({ hotty.text("n", "2"), hotty.attr("n", "title", "T") }))
+	cmds = sent(ctx)
+	eq(actions(cmds), "delta app-card", "a frame's changes are one delta")
+	eq(#ops(cmds[1]), 2)
 	sf:set({ x = 5 })
 	cmds = sent(ctx)
 	eq(actions(cmds), "place app-card")
@@ -371,7 +390,7 @@ test("auto rows: a numbered placement, then the host's rows", function()
 	eq(actions(cmds), "doc card, place card")
 	eq(cmds[2].control.r, "auto")
 	eq(cmds[2].control.n, "2")
-	eq(cmds[2].control.q, "0")
+	eq(cmds[2].control.q, nil, "n alone asks for the reply")
 	local reply =
 		hotty.encode({ { "a", "ok" }, { "re", "place" }, { "n", "2" }, { "s", "card" }, { "c", "10" }, { "r", "5" } })
 	eq(s:hotty(ctx, reply), true)
@@ -397,7 +416,7 @@ test("requests: a numbered delta's ok, and a resource's by n alone", function()
 	local cmds = sent(ctx)
 	eq(actions(cmds), "delta card")
 	eq(cmds[1].control.n, tostring(n))
-	eq(cmds[1].control.q, "0")
+	eq(cmds[1].control.q, nil, "n alone asks for the reply")
 	s:hotty(ctx, hotty.encode({ { "a", "ok" }, { "re", "delta" }, { "n", tostring(n) }, { "s", "card" } }))
 	eq(got.delta.ok, true)
 	eq(got.delta.surface, "card")
@@ -457,7 +476,82 @@ test("a fit event changes the rows", function()
 	local cmds = sent(ctx)
 	eq(actions(cmds), "place card")
 	eq(cmds[1].control.r, "6")
-	eq(cmds[1].control.f, "1")
+	eq(cmds[1].control.f, nil, "f is the surface's: sent once, with the first placement")
+end)
+
+test("p, f and v belong to the surface: sent when they change, not with every placement", function()
+	local s, ctx = setup()
+	local sf = s:surface("card", card({ press = true, hover = true }))
+	local cmds = sent(ctx)
+	eq(actions(cmds), "doc card, place card")
+	eq(cmds[2].control.p, "1")
+	eq(cmds[2].control.v, "1")
+	eq(cmds[2].control.f, nil, "absent: never sent")
+	sf:set({ x = 5 })
+	cmds = sent(ctx)
+	eq(actions(cmds), "place card")
+	eq(cmds[1].control.p, nil, "as they were")
+	eq(cmds[1].control.v, nil)
+	sf:set({ press = false, fit = true })
+	cmds = sent(ctx)
+	eq(cmds[1].control.p, "0", "off")
+	eq(cmds[1].control.f, "1", "on")
+	eq(cmds[1].control.v, nil)
+	sf:set({ hover = false })
+	eq(sent(ctx)[1].control.v, "0")
+	sf:set({ x = 6 })
+	local c = sent(ctx)[1].control
+	eq(c.p, nil)
+	eq(c.f, nil)
+	eq(c.v, nil)
+	-- A new document in place keeps what the host holds.
+	sf:set({ html = "<p>new</p>", press = true })
+	cmds = sent(ctx)
+	eq(actions(cmds), "doc card, place card")
+	eq(cmds[2].control.p, "1")
+	eq(cmds[2].control.f, nil, "still on, from before")
+	-- A surface the host lost starts from none.
+	s:hotty(ctx, err("delta", "card", "ENOENT"))
+	cmds = sent(ctx)
+	eq(actions(cmds), "doc card, place card")
+	eq(cmds[2].control.p, "1")
+	eq(cmds[2].control.f, "1")
+	eq(cmds[2].control.v, nil, "off, and the host has none")
+	-- So does a new host, and one deleted out of view.
+	s:hotty_caps(ctx, CAPS)
+	cmds = sent(ctx)
+	eq(cmds[2].control.p, "1")
+	eq(cmds[2].control.f, "1")
+	sf:set({ x = 50 })
+	eq(actions(sent(ctx)), "del card")
+	sf:set({ x = 2 })
+	cmds = sent(ctx)
+	eq(actions(cmds), "doc card, place card")
+	eq(cmds[2].control.p, "1")
+	eq(cmds[2].control.f, "1")
+end)
+
+test("a caps event folds into the host's capabilities, and the limit follows", function()
+	local got = {}
+	local p, ctx = new_plx(), new_ctx(CAPS)
+	local s = hplx.session(nil, {
+		plx = p,
+		on_caps = function(c, changed)
+			got.caps, got.changed = c, changed
+		end,
+	})
+	s:attach(ctx)
+	eq(s.caps.cell_css.w, 9)
+	local body = mp.pack({ cellcss = { w = mp.float(12), h = mp.float(24) }, limits = { surfaces = 3 } })
+	eq(s:hotty(ctx, hotty.encode({ { "a", "ev" }, { "e", "caps" } }, body)), true)
+	eq(s.caps.cell_css.w, 12)
+	eq(s.caps.host, "fake", "what it leaves out stays")
+	eq(s.limit, 3)
+	eq(got.caps, s.caps)
+	ok(got.changed.raw.cellcss)
+	s:hotty(ctx, hotty.encode({ { "a", "ev" }, { "e", "caps" } }, mp.pack({ limits = {}, host = "" })))
+	eq(s.caps.host, nil, "emptied: absent now")
+	eq(s.limit, 48)
 end)
 
 test("limits.surfaces: no room, until one goes out of view", function()
@@ -568,7 +662,7 @@ test("examples/plx/click.lua: the surface, a click and its delta", function()
 	t.on_hotty(ctx, event("card", "click", "go", mp.pack({})))
 	cmds = sent(ctx)
 	eq(actions(cmds), "delta card")
-	eq(cmds[1].payload, "1 click")
+	eq(ops(cmds[1])[1].value, "1 click")
 	ctx.cols = 20
 	t.on_resize(ctx, 20, 10)
 	t.render(ctx)

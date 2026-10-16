@@ -38,6 +38,8 @@ Surface.__index = Surface
 ---                 changed ("native" or "text"; caps nil for text)
 ---   on_event      function(event, surface): what the user did, in any surface
 ---   on_error      function(err, surface): a command the host refused
+---   on_caps       function(caps, changed): the host's capabilities changed
+---                 (a caps event, SPEC §4); session.caps is current
 ---   max_surfaces  48 by default; the host's limits.surfaces when lower
 ---   plx           plx-script's plx table: the global plx by default
 function M.session(tool, opts)
@@ -48,6 +50,7 @@ function M.session(tool, opts)
 		on_ready = opts.on_ready,
 		on_event = opts.on_event,
 		on_error = opts.on_error,
+		on_caps = opts.on_caps,
 		max_surfaces = opts.max_surfaces or M.MAX_SURFACES,
 		decoder = hotty.decoder(),
 		surfaces = {}, -- by full name
@@ -216,6 +219,7 @@ end
 function Session:forget()
 	for _, sf in pairs(self.surfaces) do
 		sf.sent, sf.placed, sf.measuring = false, nil, false
+		sf.flags = nil
 		if not sf.spec.rows then
 			sf.rows = nil
 		end
@@ -248,6 +252,9 @@ Session.relayout = Session.schedule
 -- What the host sent: an event or an error for one of this session's
 -- surfaces. Returns whether it was this session's.
 function Session:message(msg)
+	if msg.control.a == "ev" and msg.control.e == hotty.EVENT_CAPS then
+		return self:caps_changed(msg:event())
+	end
 	local s = msg.control.s
 	local sf = s and self.surfaces[s]
 	if not sf then
@@ -286,9 +293,11 @@ function Session:message(msg)
 			-- The host lost the document: plx's relay says so in answer to its
 			-- own placement of the surface (re=place).
 			sf.sent, sf.placed = false, nil
+			sf.flags = nil
 			self:schedule()
 		elseif r.code == hotty.EQUOTA and r.re == "doc" then
 			sf.sent, sf.placed = false, nil
+			sf.flags = nil
 			self.limit = math.max(0, self:count_sent())
 		end
 		if self.on_error then
@@ -297,6 +306,24 @@ function Session:message(msg)
 		return true
 	end
 	return false
+end
+
+-- A caps event: the capabilities that changed are folded into the host's
+-- (SPEC §4, §9), and the surface limit follows.
+function Session:caps_changed(ev)
+	local changed = ev and ev:changed()
+	if not changed or self.mode ~= hotty.NATIVE or not self.caps then
+		return false
+	end
+	self.caps = self.caps:merge(changed)
+	self.limit = self.max_surfaces
+	if self.caps.limits.surfaces then
+		self.limit = math.min(self.max_surfaces, self.caps.limits.surfaces)
+	end
+	if self.on_caps then
+		self.on_caps(self.caps, changed)
+	end
+	return true
 end
 
 function Session:count_sent()
@@ -366,9 +393,15 @@ function Surface:want(area)
 	end
 	local cols = spec.cols
 	local rows = spec.rows or self.rows
-	local pl = { cols = cols, rows = rows, z = spec.z, press = spec.press, fit = spec.fit, hover = spec.hover }
-	local flags =
-		table.concat({ tostring(spec.z or 0), tostring(spec.press), tostring(spec.fit), tostring(spec.hover) }, ":")
+	local pl = {
+		cols = cols,
+		rows = rows,
+		z = spec.z,
+		press = spec.press and true or false,
+		fit = spec.fit and true or false,
+		hover = spec.hover and true or false,
+	}
+	local flags = table.concat({ spec.z or 0, spec.press and 1 or 0, spec.fit and 1 or 0, spec.hover and 1 or 0 }, ":")
 	if not rows then
 		-- Auto: placed whole, unclipped, until the host says how tall; placed
 		-- again where it is moved, should the host never say.
@@ -425,7 +458,7 @@ function Session:layout()
 							measures[#measures + 1] = { sf, want }
 						end
 					else
-						add(hotty.place_at(id, want.x, want.y, want.placement))
+						add(hotty.place_at(id, want.x, want.y, sf:flagged(want.placement)))
 					end
 					sf.placed = want.key
 				end
@@ -435,6 +468,7 @@ function Session:layout()
 				else
 					add(hotty.del(id))
 					sf.sent = false
+					sf.flags = nil
 				end
 				sf.placed = nil
 			end
@@ -471,6 +505,7 @@ function Session:room(sf, add)
 	end
 	add(hotty.del(victim.id))
 	victim.sent = false
+	victim.flags = nil
 	return true
 end
 
@@ -478,7 +513,7 @@ end
 -- host chose.
 function Session:measure(sf, want)
 	self:request(function(o)
-		return hotty.place_at(sf.id, want.x, want.y, want.placement, o)
+		return hotty.place_at(sf.id, want.x, want.y, sf:flagged(want.placement), o)
 	end, function(r)
 		sf.measuring = false
 		if r and r.ok and r.rows then
@@ -546,6 +581,32 @@ function Surface:set(spec)
 	return self
 end
 
+-- The flags (SPEC §5.2): press, fit and hover belong to the surface on the
+-- host, which holds them until they are sent again, so a placement carries
+-- each only when it differs from what the host last had: true when it turns
+-- on, false when it turns off, nil when it is as it was. A surface the host
+-- lost, or deleted, starts again from none. Returns the placement to send,
+-- and notes what the host will have.
+local FLAGS = { "press", "fit", "hover" }
+
+function Surface:flagged(pl)
+	local have, out, now = self.flags or {}, {}, {}
+	for k, v in pairs(pl) do
+		out[k] = v
+	end
+	for _, f in ipairs(FLAGS) do
+		local on = pl[f] and true or false
+		now[f] = on
+		if on == (have[f] or false) then
+			out[f] = nil
+		else
+			out[f] = on
+		end
+	end
+	self.flags = now
+	return out
+end
+
 --- Sends commands for this surface, once its document is on the host. They
 --- change the host's copy only: the document sent again, when the host lost
 --- it, is spec.html's.
@@ -556,8 +617,10 @@ function Surface:send(cmd)
 	return self.session:send(cmd)
 end
 
-function Surface:delta(op, target, key, payload, opts)
-	return self:send(hotty.delta(self.id, op, target, key, payload, opts))
+--- Sends one delta of ops (hotty.text, hotty.attr and the rest build them):
+--- a frame's changes to the surface, applied and shown as one (SPEC §6.1).
+function Surface:delta(ops, opts)
+	return self:send(hotty.delta(self.id, ops, opts))
 end
 
 function Surface:set_text(target, text, opts)
@@ -601,6 +664,7 @@ function Surface:remove()
 	if self.sent then
 		s:send(hotty.del(self.id))
 		self.sent = false
+		self.flags = nil
 	end
 	s.surfaces[self.id] = nil
 	for i, id in ipairs(s.order) do
