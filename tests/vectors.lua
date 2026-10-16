@@ -22,20 +22,7 @@ local null = json.null
 
 -- What this SDK implements, for vectors marked "requires".
 local FEATURES = {
-	["place.hover"] = true,
-	["event.hover"] = true,
-	["caps.passthrough"] = true,
-	["caps.version"] = true,
-	["caps.drag-kinds"] = true,
 	["options.unordered"] = true,
-	["doc.scroll"] = true,
-	["event.area"] = true,
-	["event.view"] = true,
-	["event.count"] = true,
-	["event.drop"] = true,
-	["caps.views"] = true,
-	["reveal"] = true,
-	["caps.scroll"] = true,
 	["decode.abort-count"] = true,
 	["decode.max"] = true,
 	["decode.unterminated"] = true,
@@ -189,14 +176,20 @@ end
 
 local function placement(p)
 	local w = not absent(p.window) and { x = p.window.x, y = p.window.y, w = p.window.w, h = p.window.h } or nil
+	local function flag(v)
+		if absent(v) then
+			return nil
+		end
+		return v
+	end
 	return {
 		cols = p.cols,
 		rows = p.rows,
 		window = w,
 		z = p.z,
-		press = p.press,
-		fit = p.fit,
-		hover = p.hover,
+		press = flag(p.press),
+		fit = flag(p.fit),
+		hover = flag(p.hover),
 		keep_cursor = p.keep_cursor,
 	}
 end
@@ -219,7 +212,7 @@ local function build(b)
 	elseif name == "hide" then
 		return hotty.hide(a.surface, opts)
 	elseif name == "delta" then
-		return hotty.delta(a.surface, a.op, a.target, a.key, a.payload, opts)
+		return hotty.delta(a.surface, a.ops, opts)
 	elseif name == "set_text" then
 		return hotty.set_text(a.surface, a.target, a.text, opts)
 	elseif name == "set_var" then
@@ -250,6 +243,10 @@ local function build(b)
 		return hotty.edit(a.names, opts)
 	elseif name == "menu" then
 		return hotty.menu(not absent(a.menu) and a.menu or nil, opts)
+	elseif name == "menu_show" then
+		return hotty.menu_show(a.keys, opts)
+	elseif name == "menu_hide" then
+		return hotty.menu_hide(opts)
 	elseif name == "sync" then
 		local cmds = {}
 		for i, c in ipairs(a.commands) do
@@ -353,13 +350,13 @@ local function reply_view(r)
 		rows = r.rows,
 		code = r.code,
 		detail = r.detail,
+		op = r.op,
 	}
 end
 
 local function event_view(e)
 	local cmd = e:command()
 	local href, url = e:link()
-	local w, h = e:size()
 	return {
 		surface = e.surface,
 		kind = e.kind,
@@ -368,7 +365,7 @@ local function event_view(e)
 		checked = e:checked(),
 		fields = e:fields(),
 		link = href and { href = href, url = url } or nil,
-		size = w and { w = w, h = h } or nil,
+		mods = e:mods(),
 		fit_rows = e:fit_rows(),
 		drag = e:drag(),
 		hover = e:hover(),
@@ -380,40 +377,23 @@ local function event_view(e)
 end
 
 local function caps_view(c, want)
-	local w, h = c:cell_css()
 	local view = {
 		v = c.v,
-		ops = c.ops,
-		events = c.events,
-		cell = c.cell,
+		cell_css = c.cell_css,
 		scale = c.scale,
 		scheme = c.scheme,
+		mod = c.mod,
+		features = c.features,
 		limits = c.limits,
 		net = c.net,
-		passthrough = c.passthrough,
-		scroll = c.scroll,
-		steps = c.steps,
-		drop = c.drop,
-		count = c.count,
-		mod = c.mod,
 		edit = c.edit,
-		keys = c.keys,
-		menu = c.menu,
 		host = c.host,
 		version = c.version,
-		drags = c:drags(),
-		hovers = c:hovers(),
-		views = c:views(),
 		light = c:light(),
-		cell_css = { w = w, h = h },
-		supports = {},
-		sends = {},
+		has = {},
 	}
-	for op in pairs(want.supports or {}) do
-		view.supports[op] = c:supports(op)
-	end
-	for kind in pairs(want.sends or {}) do
-		view.sends[kind] = c:sends(kind)
+	for feature in pairs(want.has or {}) do
+		view.has[feature] = c:has(feature)
 	end
 	return view
 end
@@ -693,13 +673,19 @@ local function run_keys(v)
 end
 
 local function run_keymap(v)
-	if v.program ~= nil or v.scroll ~= nil then
+	if v.program ~= nil or v.prefix ~= nil or v.scroll ~= nil then
 		-- An element's keymap outside a text field: no default keymap.
 		local m = hotty.parse_keymap(v.platform, table.concat(v.keys, " "))
 		for key, want in pairs(v.program or {}) do
 			local got = m:program(key)
 			if got ~= want then
 				return false, show(key) .. ": program " .. show(got) .. ", want " .. show(want)
+			end
+		end
+		for key, want in pairs(v.prefix or {}) do
+			local got = m:prefix(key)
+			if got ~= want then
+				return false, show(key) .. ": prefix " .. show(got) .. ", want " .. show(want)
 			end
 		end
 		for key, want in pairs(v.scroll or {}) do

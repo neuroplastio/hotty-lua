@@ -29,7 +29,7 @@ M.NUMBER = "7279" -- the OSC number
 M.CHUNK = 4096 -- the most base64 bytes in one sequence
 M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
-M.VERSION = "0.2" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
+M.VERSION = "0.3" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
 M.SCAN_MAX = 65536 -- the longest HOTTY sequence a Scanner takes
 
@@ -41,15 +41,14 @@ M.EVENT_SUBMIT = "submit"
 M.EVENT_PRESS = "press"
 M.EVENT_FOCUS = "focus"
 M.EVENT_BLUR = "blur"
-M.EVENT_RESIZE = "resize"
 M.EVENT_FIT = "fit"
 M.EVENT_HOVER = "hover"
 M.EVENT_VIEW = "view"
 M.EVENT_DRAG_START = "dragstart"
 M.EVENT_DRAG = "drag"
 M.EVENT_DRAG_END = "dragend"
-M.EVENT_COMMAND = "command" -- an edit command the program takes (SPEC §10.6); no surface
-M.EVENT_CAPS = "caps" -- the capabilities mod, edit or keys changed (SPEC §4); no surface
+M.EVENT_COMMAND = "command" -- an edit command the program takes, or a pick from its menu (SPEC §10.6, §10.7); no surface
+M.EVENT_CAPS = "caps" -- a capability changed (SPEC §4); no surface
 M.EVENTS = {
 	"click",
 	"change",
@@ -58,7 +57,6 @@ M.EVENTS = {
 	"press",
 	"focus",
 	"blur",
-	"resize",
 	"fit",
 	"hover",
 	"view",
@@ -108,6 +106,29 @@ M.OPS = {
 	"var",
 	"reveal",
 }
+
+-- The optional features a host may have (SPEC §4), as its capabilities list
+-- them (Caps:has).
+M.FEATURE_PASSTHROUGH = "passthrough" -- the pointer passes through the parts of a surface that take none (SPEC §9.3)
+M.FEATURE_HOVER = "hover" -- it says where the pointer is, with hover events (SPEC §9.4)
+M.FEATURE_COUNT = "count" -- it says that a click repeats one before it (SPEC §9)
+M.FEATURE_MENU = "menu" -- it keeps a program's menu, shows its levels and lets the user pick from it (SPEC §10.7)
+M.FEATURES = { "passthrough", "hover", "count", "menu" }
+
+-- The modifier keys held during a click, a press or a drag, as the bits of
+-- Event:mods (SPEC §9).
+M.MOD_SHIFT = 1
+M.MOD_ALT = 2
+M.MOD_CONTROL = 4
+M.MOD_META = 8
+
+-- Where a reveal brings an element (SPEC §6.1).
+M.REVEAL_NEAREST = "" -- as little as brings it into view
+M.REVEAL_START = "start" -- its top at the top of each box that holds it
+M.REVEAL_END = "end" -- its bottom at the bottom
+
+-- How deep a menu's items nest, the top level's being one deep (SPEC §10.7).
+M.MENU_DEPTH = 8
 
 -- Quiet levels (SPEC §3.5).
 M.REPLY_ALWAYS = 0
@@ -234,7 +255,9 @@ end
 --- One command as one or more OSC sequences. control is a control
 --- (hotty.control) or a list of {key, value}, in the order they go out;
 --- values are cleaned, and the keys o and m, which are encode's to set, are
---- left out. payload is a string of bytes, or nil.
+--- left out. A payload longer than CHUNK in base64 goes out in chunks, the
+--- first with the whole control and m=1, every further one with m alone
+--- (SPEC §3.4). payload is a string of bytes, or nil.
 ---
 --- opts.compress, a function from bytes to zlib bytes, compresses a payload
 --- of COMPRESS_FROM bytes or more when that makes it smaller, and marks it
@@ -249,14 +272,10 @@ function M.encode(control, payload, opts)
 			body, zipped = z, true
 		end
 	end
-	local parts, quiet = {}, nil
+	local parts = {}
 	for _, p in ipairs(control_pairs(control)) do
 		if p[1] ~= "o" and p[1] ~= "m" then -- Encode's to set
-			local v = M.clean_value(p[2])
-			parts[#parts + 1] = p[1] .. "=" .. v
-			if p[1] == "q" then
-				quiet = v
-			end
+			parts[#parts + 1] = p[1] .. "=" .. M.clean_value(p[2])
 		end
 	end
 	if zipped then
@@ -268,14 +287,13 @@ function M.encode(control, payload, opts)
 		return PREFIX .. ctl .. (b64 ~= "" and (";" .. b64) or "") .. ST
 	end
 	local out = {}
-	local tail = quiet and (":q=" .. quiet) or ""
 	for i = 1, #b64, M.CHUNK do
 		local piece = sub(b64, i, i + M.CHUNK - 1)
 		if i == 1 then
 			out[#out + 1] = PREFIX .. ctl .. ":m=1;" .. piece .. ST
 		else
 			local more = (i + M.CHUNK > #b64) and "0" or "1"
-			out[#out + 1] = PREFIX .. "m=" .. more .. tail .. ";" .. piece .. ST
+			out[#out + 1] = PREFIX .. "m=" .. more .. ";" .. piece .. ST
 		end
 	end
 	return join(out)
@@ -289,7 +307,8 @@ end
 
 -- The reply options: n numbers the command and asks for its reply (q=0), q
 -- sets the quiet level, and a q given wins over the one n implies, whatever
--- the order (SDK.md §3.4.2).
+-- the order (SDK.md §3.4.2). q goes out only where the wire does not imply
+-- it: 0 with n, else 1 (SPEC §3.5).
 local function command(pairs_, payload, default_q, opts)
 	local n, q = opts and opts.n, opts and opts.q
 	if n ~= nil then
@@ -298,7 +317,10 @@ local function command(pairs_, payload, default_q, opts)
 	if q == nil then
 		q = n ~= nil and M.REPLY_ALWAYS or default_q
 	end
-	pairs_[#pairs_ + 1] = { "q", int(q) }
+	local implied = n ~= nil and M.REPLY_ALWAYS or M.REPLY_ON_ERROR
+	if q ~= implied then
+		pairs_[#pairs_ + 1] = { "q", int(q) }
+	end
 	return M.encode(pairs_, payload, opts)
 end
 
@@ -337,6 +359,8 @@ end
 
 -- A placement's control (SDK.md §3.4.1). A placement is a table: cols, rows
 -- (0 or nil is auto), window {x, y, w, h}, z, press, fit, hover, keep_cursor.
+-- press, fit and hover belong to the surface (SPEC §5.2), so each is true
+-- (p=1), false (p=0) or nil, which sends nothing and leaves it as it was.
 local function placement_pairs(surface, pl)
 	local cols, rows = pl.cols or 0, pl.rows or 0
 	local p = {
@@ -360,14 +384,12 @@ local function placement_pairs(surface, pl)
 	if pl.z and pl.z ~= 0 then
 		p[#p + 1] = { "z", int(pl.z) }
 	end
-	if pl.press then
-		p[#p + 1] = { "p", "1" }
-	end
-	if pl.fit then
-		p[#p + 1] = { "f", "1" }
-	end
-	if pl.hover then
-		p[#p + 1] = { "v", "1" }
+	for _, f in ipairs({ { "p", pl.press }, { "f", pl.fit }, { "v", pl.hover } }) do
+		if f[2] == true then
+			p[#p + 1] = { f[1], "1" }
+		elseif f[2] == false then
+			p[#p + 1] = { f[1], "0" }
+		end
 	end
 	if pl.keep_cursor then
 		p[#p + 1] = { "C", "1" }
@@ -408,49 +430,173 @@ function M.hide(surface, opts)
 	return command({ { "a", "hide" }, { "s", surface } }, nil, M.NO_REPLY, opts)
 end
 
---- Changes a surface's document (SPEC §6.1). target and key are sent only
---- when given (not nil or ""). opts: n, q (default 2).
-function M.delta(surface, op, target, key, payload, opts)
-	local p = { { "a", "delta" }, { "s", surface }, { "op", op } }
-	if target and target ~= "" then
-		p[#p + 1] = { "t", target }
+-- msgpack for a program's bodies, a delta's ops and a menu: each str, array
+-- and map header in the smallest form it fits (SPEC §3.3).
+local function mp_head(n, fix, fixmax, h8, h16, h32)
+	if n <= fixmax then
+		return char(fix + n)
+	elseif h8 and n < 256 then
+		return char(h8, n)
+	elseif n < 65536 then
+		return char(h16, floor(n / 256), n % 256)
 	end
-	if key and key ~= "" then
-		p[#p + 1] = { "k", key }
-	end
-	return command(p, payload, M.NO_REPLY, opts)
+	return char(h32, floor(n / 16777216) % 256, floor(n / 65536) % 256, floor(n / 256) % 256, n % 256)
 end
 
---- Replaces the target's children with one text node: op=text.
+local function mp_str(s)
+	return mp_head(#s, 0xa0, 31, 0xd9, 0xda, 0xdb) .. s
+end
+
+local function mp_array(n)
+	return mp_head(n, 0x90, 15, nil, 0xdc, 0xdd)
+end
+
+local function mp_map(n)
+	return mp_head(n, 0x80, 15, nil, 0xde, 0xdf)
+end
+
+-- Ops (SDK.md §3.4.3) ------------------------------------------------------------
+
+-- An op: a table with op, target, key and value. value is nil for an op that
+-- takes none, and a string, even empty, for one that does.
+local function valued(op, target, key, value)
+	return { op = op, target = target, key = key, value = tostring(value) }
+end
+
+--- Morphs the target into html, or with no target (nil or ""), each
+--- top-level element of html into the document's element with its id (SPEC
+--- §6.2).
+function M.morph(target, html)
+	return valued("morph", target, nil, html)
+end
+
+--- Morphs the target's children into the nodes of html.
+function M.inner(target, html)
+	return valued("inner", target, nil, html)
+end
+
+--- Replaces the target with the nodes of html, without morphing.
+function M.replace(target, html)
+	return valued("replace", target, nil, html)
+end
+
+--- Adds the nodes of html as the target's last children.
+function M.append(target, html)
+	return valued("append", target, nil, html)
+end
+
+--- Adds the nodes of html as the target's first children.
+function M.prepend(target, html)
+	return valued("prepend", target, nil, html)
+end
+
+--- Inserts the nodes of html before the target.
+function M.before(target, html)
+	return valued("before", target, nil, html)
+end
+
+--- Inserts the nodes of html after the target.
+function M.after(target, html)
+	return valued("after", target, nil, html)
+end
+
+--- Removes the target. It has no value.
+function M.remove(target)
+	return { op = "remove", target = target }
+end
+
+--- Sets the target's attribute name.
+function M.attr(target, name, value)
+	return valued("attr", target, name, value)
+end
+
+--- Removes the target's attribute name. It has no value.
+function M.unattr(target, name)
+	return { op = "unattr", target = target, key = name }
+end
+
+--- Replaces the target's children with one text node.
+function M.text(target, text)
+	return valued("text", target, nil, text)
+end
+
+--- Sets the custom property --name on the target.
+function M.var(target, name, value)
+	return valued("var", target, name, value)
+end
+
+--- Scrolls the target into view (SPEC §6.1): where is "start", "end", or nil
+--- (or "") for as little as brings it into view, which gives the op no
+--- value. (SDK.md's RevealOp; hotty.reveal sends one.)
+function M.reveal_op(target, where)
+	if where == nil or where == M.REVEAL_NEAREST then
+		return { op = "reveal", target = target }
+	end
+	return valued("reveal", target, nil, where)
+end
+
+-- One op as the msgpack map SDK.md §3.4.3 gives it: op, t unless the target
+-- is empty, k when there is a key, v when there is a value.
+local function mp_op(o)
+	local out, n = { mp_str("op") .. mp_str(o.op) }, 1
+	if o.target ~= nil and o.target ~= "" then
+		out[#out + 1] = mp_str("t") .. mp_str(o.target)
+		n = n + 1
+	end
+	if o.key ~= nil and o.key ~= "" then
+		out[#out + 1] = mp_str("k") .. mp_str(o.key)
+		n = n + 1
+	end
+	if o.value ~= nil then
+		out[#out + 1] = mp_str("v") .. mp_str(o.value)
+		n = n + 1
+	end
+	return mp_map(n) .. concat(out)
+end
+
+--- Changes a surface's document (SPEC §6.1): ops, a list of the ops that
+--- hotty.morph, hotty.text, hotty.attr and the rest build, which the host
+--- applies in order and shows as one. A program that changes a surface in
+--- one frame sends one delta (SDK.md §2.9). A delta of no ops is sent, and
+--- the host refuses it (EINVAL). opts: n, q (default 2).
+function M.delta(surface, ops, opts)
+	local out = {}
+	for i, o in ipairs(ops or {}) do
+		out[i] = mp_op(o)
+	end
+	local body = mp_map(1) .. mp_str("ops") .. mp_array(#out) .. join(out, #out)
+	return command({ { "a", "delta" }, { "s", surface } }, body, M.NO_REPLY, opts)
+end
+
+--- Replaces the target's children with one text node: a delta of one text op.
 function M.set_text(surface, target, text, opts)
-	return M.delta(surface, "text", target, nil, text, opts)
+	return M.delta(surface, { M.text(target, text) }, opts)
 end
 
---- Sets the custom property --name on the target: op=var.
+--- Sets the custom property --name on the target: a delta of one var op.
 function M.set_var(surface, target, name, value, opts)
-	return M.delta(surface, "var", target, name, tostring(value), opts)
+	return M.delta(surface, { M.var(target, name, value) }, opts)
 end
 
---- Sets the target's attribute name: op=attr.
+--- Sets the target's attribute name: a delta of one attr op.
 function M.set_attr(surface, target, name, value, opts)
-	return M.delta(surface, "attr", target, name, tostring(value), opts)
+	return M.delta(surface, { M.attr(target, name, value) }, opts)
 end
 
---- Removes the target's attribute name: op=unattr, no payload.
+--- Removes the target's attribute name: a delta of one unattr op.
 function M.remove_attr(surface, target, name, opts)
-	return M.delta(surface, "unattr", target, name, nil, opts)
+	return M.delta(surface, { M.unattr(target, name) }, opts)
 end
 
---- Morphs the target into html: op=morph with a target.
+--- Morphs the target into html: a delta of one morph op.
 function M.morph_to(surface, target, html, opts)
-	return M.delta(surface, "morph", target, nil, html, opts)
+	return M.delta(surface, { M.morph(target, html) }, opts)
 end
 
---- Scrolls the target into view (SPEC §6.1): op=reveal, where "start" or
---- "end" in the payload, or nil (or "") for as little as brings it into
---- view.
+--- Scrolls the target into view (SPEC §6.1): a delta of one reveal op, where
+--- "start" or "end", or nil (or "") for as little as brings it into view.
 function M.reveal(surface, target, where, opts)
-	return M.delta(surface, "reveal", target, nil, where, opts)
+	return M.delta(surface, { M.reveal_op(target, where) }, opts)
 end
 
 --- Sends a resource that documents refer to as cid:<id> (SPEC §7.1).
@@ -504,55 +650,74 @@ function M.edit(names, opts)
 	return command({ { "a", "edit" }, { "take", table.concat(names or {}, ",") } }, nil, M.NO_REPLY, opts)
 end
 
--- msgpack for a menu: the smallest form of each str, array and map header.
-local function mp_head(n, fix, fixmax, h8, h16, h32)
-	local char, floor = string.char, math.floor
-	if n <= fixmax then
-		return char(fix + n)
-	elseif h8 and n < 256 then
-		return char(h8, n)
-	elseif n < 65536 then
-		return char(h16, floor(n / 256), n % 256)
-	end
-	return char(h32, floor(n / 16777216) % 256, floor(n / 65536) % 256, floor(n / 256) % 256, n % 256)
-end
-
-local function mp_str(s)
-	return mp_head(#s, 0xa0, 31, 0xd9, 0xda, 0xdb) .. s
-end
-
---- Shows the which-key menu of a program's key sequence while it waits, or
---- with nil hides it (SPEC §10.6). level is {seq = {key…}, label, items =
---- {{key, label, group, enabled}…}}, enabled true when nil; it goes out as
---- msgpack in myelin's names and order (SDK.md §3.4). opts: n, q (default 2).
-function M.menu(level, opts)
-	if level == nil then
+--- Tells the host what the program can do now (SPEC §10.7): its menu, a tree
+--- of actions with the keys that reach them and the names a pick sends. It
+--- lasts until the program sends another, and with nil the program has none.
+--- tree is { label, items = { { key, label, name, enabled, items }… } }:
+--- enabled is true when nil, and an item with items is a group. A host that
+--- has the feature menu (Caps:has) shows and picks from it; on one that does
+--- not, the program shows its menu itself. Keep it within MENU_DEPTH
+--- levels. It goes out as msgpack, each value in the smallest form of its
+--- type: label unless it is empty, items; each item key, label and name
+--- unless they are empty, enabled, and items unless there are none. opts: n,
+--- q (default 2).
+function M.menu(tree, opts)
+	if tree == nil then
 		return command({ { "a", "menu" } }, nil, M.NO_REPLY, opts)
 	end
-	local seq, items = level.seq or {}, level.items or {}
-	local label = level.label or ""
-	local out = { mp_head(label ~= "" and 3 or 2, 0x80, 15, nil, 0xde, 0xdf), mp_str("seq") }
-	out[#out + 1] = mp_head(#seq, 0x90, 15, nil, 0xdc, 0xdd)
-	for _, k in ipairs(seq) do
-		out[#out + 1] = mp_str(k)
+	local function items(list, out)
+		out[#out + 1] = mp_array(#list)
+		for _, it in ipairs(list) do
+			local parts, n = {}, 1
+			for _, f in ipairs({ "key", "label", "name" }) do
+				local v = it[f]
+				if v ~= nil and v ~= "" then
+					parts[#parts + 1] = mp_str(f) .. mp_str(v)
+					n = n + 1
+				end
+			end
+			parts[#parts + 1] = mp_str("enabled") .. (it.enabled == false and "\194" or "\195")
+			local sub_ = it.items
+			if sub_ and #sub_ > 0 then
+				n = n + 1
+			end
+			out[#out + 1] = mp_map(n) .. concat(parts)
+			if sub_ and #sub_ > 0 then
+				out[#out + 1] = mp_str("items")
+				items(sub_, out)
+			end
+		end
 	end
+	local label = tree.label or ""
+	local out = { mp_map(label ~= "" and 2 or 1) }
 	if label ~= "" then
 		out[#out + 1] = mp_str("label") .. mp_str(label)
 	end
-	out[#out + 1] = mp_str("items") .. mp_head(#items, 0x90, 15, nil, 0xdc, 0xdd)
-	for _, it in ipairs(items) do
-		local il = it.label or ""
-		local n = 2 + (il ~= "" and 1 or 0) + (it.group and 1 or 0)
-		out[#out + 1] = mp_head(n, 0x80, 15, nil, 0xde, 0xdf) .. mp_str("key") .. mp_str(it.key)
-		if il ~= "" then
-			out[#out + 1] = mp_str("label") .. mp_str(il)
+	out[#out + 1] = mp_str("items")
+	items(tree.items or {}, out)
+	return command({ { "a", "menu" } }, join(out, #out), M.NO_REPLY, opts)
+end
+
+--- Shows the level of the program's menu that the keys typed reach (SPEC
+--- §10.7): keys names them as SPEC §10.4 does, "Space" and "f" for a leader
+--- and a group. With none it shows the top level. A level shows until the
+--- program shows another, or hides it. opts: n, q (default 2).
+function M.menu_show(keys, opts)
+	local body = nil
+	if keys and #keys > 0 then
+		local out = { mp_map(1) .. mp_str("seq") .. mp_array(#keys) }
+		for i, k in ipairs(keys) do
+			out[i + 1] = mp_str(k)
 		end
-		if it.group then
-			out[#out + 1] = mp_str("group") .. "\195"
-		end
-		out[#out + 1] = mp_str("enabled") .. (it.enabled == false and "\194" or "\195")
+		body = join(out, #out)
 	end
-	return command({ { "a", "menu" } }, table.concat(out), M.NO_REPLY, opts)
+	return command({ { "a", "menu" }, { "show", "1" } }, body, M.NO_REPLY, opts)
+end
+
+--- Hides the level shown (SPEC §10.7). The menu stays. opts: n, q (default
+--- 2).
+function M.menu_hide(opts)
+	return command({ { "a", "menu" }, { "show", "0" } }, nil, M.NO_REPLY, opts)
 end
 
 --- Commands already built, bracketed in synchronized output, so the host
@@ -583,16 +748,23 @@ Error.__tostring = function(e)
 		s = s .. ": " .. e.detail
 	end
 	if e.re then
-		s = s .. " (re=" .. e.re .. (e.surface and (", s=" .. e.surface) or "") .. ")"
+		s = s
+			.. " (re="
+			.. e.re
+			.. (e.surface and (", s=" .. e.surface) or "")
+			.. (e.op and (", op " .. e.op) or "")
+			.. ")"
 	end
 	return s
 end
 M.Error = Error
 
 --- An error: a code (EINVAL, ENOENT, …) and a detail, and the action and
---- surface it answers when known. tostring names them.
-function M.error(code, detail, re, surface)
-	return setmetatable({ code = code, detail = detail, re = re, surface = surface }, Error)
+--- surface it answers when known, and, in an error answering a delta, the
+--- index of the op at fault, from 0 as the wire has it (SPEC §6.1). tostring
+--- names them.
+function M.error(code, detail, re, surface, op)
+	return setmetatable({ code = code, detail = detail, re = re, surface = surface, op = op }, Error)
 end
 
 -- The types of a body's fields (SPEC §3.3): a type's name; a list of one
@@ -600,37 +772,28 @@ end
 -- of each value of a map keyed by strings. A field not named is not
 -- checked, as one the SDK does not know is ignored (SDK.md §2.7).
 local AREA = { c = "int", r = "int", w = "int", h = "int" }
-local DRAG = { c = "int", r = "int", keys = { "str" }, x = "int", y = "int", tx = "int", ty = "int" }
+local DRAG = { c = "int", r = "int", mods = "int", x = "int", y = "int", tx = "int", ty = "int" }
 local ERROR = { code = "str", detail = "str" }
 local CAPS = {
 	v = "str",
-	ops = { "str" },
-	events = { "str" },
-	cell = { w = "int", h = "int" },
+	cellcss = { w = "float", h = "float" },
 	scale = "float",
 	scheme = "str",
+	mod = "str",
+	features = { "str" },
 	limits = { ["*"] = "int" },
 	net = { ["*"] = { "str" } },
-	passthrough = "bool",
-	scroll = "bool",
-	steps = "bool",
-	drop = "bool",
-	count = "bool",
-	mod = "str",
 	edit = { ["*"] = { "str" } },
-	keys = { leader = "str", timeout = "int" },
-	menu = "bool",
 	host = "str",
 	version = "str",
 }
 -- Each kind's detail (SPEC §9); a kind not here carries none the SDK reads.
 local DETAIL = {
-	click = { value = "str", href = "str", url = "str", area = AREA, count = "int" },
-	press = { area = AREA },
+	click = { value = "str", href = "str", url = "str", area = AREA, mods = "int", count = "int" },
+	press = { area = AREA, mods = "int" },
 	change = { checked = "bool", value = "str" },
 	input = { value = "str" },
-	submit = { ["*"] = "str" },
-	resize = { w = "float", h = "float" },
+	submit = { fields = { { "str" } } },
 	fit = { r = "int" },
 	dragstart = DRAG,
 	drag = DRAG,
@@ -771,7 +934,11 @@ function Message:reply()
 		surface = c.s,
 		cols = to_int(c.c),
 		rows = to_int(c.r),
+		op = to_int(c.i),
 	}, Reply)
+	if r.op and r.op < 0 then
+		r.op = nil
+	end
 	if not r.ok then
 		local body = typed_message(self, ERROR)
 		if body then
@@ -789,24 +956,16 @@ M.Caps = Caps
 local function new_caps(d)
 	local c = setmetatable({ raw = d }, Caps)
 	c.v = d.v or ""
-	c.ops = d.ops or {}
-	c.events = d.events or {}
-	if d.cell and d.cell.w and d.cell.h then
-		c.cell = { w = d.cell.w, h = d.cell.h }
+	if d.cellcss and d.cellcss.w and d.cellcss.h then
+		c.cell_css = { w = d.cellcss.w, h = d.cellcss.h }
 	end
 	c.scale = d.scale
 	c.scheme = d.scheme or ""
+	c.mod = d.mod
+	c.features = d.features or {}
 	c.limits = d.limits or {}
 	c.net = d.net or {}
-	c.passthrough = d.passthrough == true
-	c.scroll = d.scroll == true
-	c.steps = d.steps == true
-	c.drop = d.drop == true
-	c.count = d.count == true
-	c.mod = d.mod
 	c.edit = d.edit
-	c.keys = d.keys and { leader = d.keys.leader, timeout = d.keys.timeout }
-	c.menu = d.menu == true
 	c.host = d.host
 	c.version = d.version
 	return c
@@ -840,7 +999,7 @@ function Reply:err()
 	if self.ok then
 		return nil
 	end
-	return M.error(self.code or "", self.detail, self.re, self.surface)
+	return M.error(self.code or "", self.detail, self.re, self.surface, self.op)
 end
 
 local Event = {}
@@ -858,11 +1017,20 @@ function Message:event()
 	end
 	local t = DETAIL[c.e]
 	local d = t and typed_message(self, t)
+	if d and c.e == "submit" then
+		-- Each field is a pair of a name and a value, and no more.
+		for _, f in ipairs(d.fields or {}) do
+			if #f ~= 2 then
+				d = nil
+				break
+			end
+		end
+	end
 	return setmetatable({
 		message = self,
 		surface = c.s,
 		kind = c.e,
-		target = c.t or "",
+		target = c.t or "", -- absent where no element is meant (SPEC §9)
 		detail = d or {},
 		_decoded = d ~= nil,
 	}, Event)
@@ -885,17 +1053,34 @@ function Event:checked()
 	return self.detail.checked
 end
 
---- A submit's fields, names to strings; nil when its detail does not
---- decode.
+--- A submit's fields in tree order, a list of {name, value} pairs (two
+--- fields of one name are two pairs); nil when its detail does not decode.
 function Event:fields()
 	if self.kind ~= M.EVENT_SUBMIT or not self._decoded then
 		return nil
 	end
 	local out = {}
-	for k, v in pairs(self.detail) do
-		out[k] = v
+	for i, f in ipairs(self.detail.fields or {}) do
+		out[i] = { f[1], f[2] }
 	end
 	return out
+end
+
+--- The modifier keys held, as the bits MOD_SHIFT, MOD_ALT, MOD_CONTROL and
+--- MOD_META: in a click, a press and a drag's events (SPEC §9). 0 when none
+--- is, and for any other kind.
+function Event:mods()
+	local k = self.kind
+	if
+		k == M.EVENT_CLICK
+		or k == M.EVENT_PRESS
+		or k == M.EVENT_DRAG_START
+		or k == M.EVENT_DRAG
+		or k == M.EVENT_DRAG_END
+	then
+		return self.detail.mods or 0
+	end
+	return 0
 end
 
 --- A link's click: its href, and its url, or nil when there is none.
@@ -907,15 +1092,6 @@ function Event:link()
 	return href, self.detail.url
 end
 
---- A resize's w and h, in CSS pixels.
-function Event:size()
-	local w, h = self.detail.w, self.detail.h
-	if self.kind ~= M.EVENT_RESIZE or w == nil or h == nil then
-		return nil
-	end
-	return w, h
-end
-
 --- A fit's rows.
 function Event:fit_rows()
 	if self.kind ~= M.EVENT_FIT then
@@ -924,10 +1100,10 @@ function Event:fit_rows()
 	return self.detail.r
 end
 
---- A drag's cell and the keys held: {c, r, keys}; its steps x and y for
---- an element with data-steps, and tx and ty in t, for a t with drop in its
---- data-on and data-steps (SPEC §9.1), each nil when the detail has none; 0 is a step like any
---- other.
+--- A drag's cell: {c, r}; its steps x and y for an element with data-steps,
+--- and tx and ty in t, for a t with drop in its data-on and data-steps (SPEC
+--- §9.1), each nil when the detail has none; 0 is a step like any other. The
+--- keys held are the event's mods.
 function Event:drag()
 	local k = self.kind
 	if k ~= M.EVENT_DRAG_START and k ~= M.EVENT_DRAG and k ~= M.EVENT_DRAG_END then
@@ -937,11 +1113,7 @@ function Event:drag()
 	if d.c == nil or d.r == nil then
 		return nil
 	end
-	local keys = {}
-	for i, key in ipairs(d.keys or keys) do
-		keys[i] = key
-	end
-	return { c = d.c, r = d.r, keys = keys, x = d.x, y = d.y, tx = d.tx, ty = d.ty }
+	return { c = d.c, r = d.r, x = d.x, y = d.y, tx = d.tx, ty = d.ty }
 end
 
 --- A hover's cell, {c, r, out = false}, or {out = true} when the pointer
@@ -1010,9 +1182,9 @@ local function has(list, v)
 	return false
 end
 
---- An edit command's (SPEC §10.6): {name, key, text}, key "" from the
---- terminal's menu, text nil when a paste carries none; nil for another kind
---- or a detail with no name.
+--- An edit command's (SPEC §10.6, §10.7): {name, key, text}, key "" from the
+--- terminal's menu or a pick from the program's, text nil when a paste
+--- carries none; nil for another kind or a detail with no name.
 function Event:command()
 	local d = self.detail
 	if self.kind ~= M.EVENT_COMMAND or type(d.name) ~= "string" then
@@ -1030,18 +1202,22 @@ function Event:changed()
 	return new_caps(self.detail)
 end
 
+-- Whether a table is the empty value of its field's type: an empty map or
+-- array, or an empty string (SPEC §9).
+local function emptied(v)
+	return v == "" or (type(v) == "table" and next(v) == nil)
+end
+
 --- These capabilities with the fields a caps event changed in place of
 --- their own, and without those it empties: a field that became absent
---- comes as an empty map (SPEC §9), edit = {} or keys = {}.
+--- comes as its type's empty value (SPEC §9), {}, [] or "".
 function Caps:merge(changed)
 	local d = {}
 	for k, v in pairs(self.raw) do
 		d[k] = v
 	end
 	for k, v in pairs(changed.raw) do
-		-- An empty table where the field is a map: its type says which.
-		local t = CAPS[k]
-		if type(v) == "table" and next(v) == nil and type(t) == "table" and t[1] == nil then
+		if emptied(v) and CAPS[k] ~= nil then
 			d[k] = nil
 		else
 			d[k] = v
@@ -1050,34 +1226,10 @@ function Caps:merge(changed)
 	return new_caps(d)
 end
 
---- Whether the host supports a delta op; one that lists none supports all.
-function Caps:supports(op)
-	return #self.ops == 0 or has(self.ops, op)
-end
-
---- Whether the host sends an event kind; one that lists none sends all.
---- drag stands for dragstart, drag and dragend.
-function Caps:sends(kind)
-	if kind == M.EVENT_DRAG_START or kind == M.EVENT_DRAG_END then
-		kind = M.EVENT_DRAG
-	end
-	return #self.events == 0 or has(self.events, kind)
-end
-
---- Whether the host lists drag. One that lists no events does not: drags
---- came after the first hosts.
-function Caps:drags()
-	return has(self.events, M.EVENT_DRAG)
-end
-
---- Whether the host lists hover. One that lists no events does not.
-function Caps:hovers()
-	return has(self.events, M.EVENT_HOVER)
-end
-
---- Whether the host lists view. One that lists no events does not.
-function Caps:views()
-	return has(self.events, M.EVENT_VIEW)
+--- Whether the host has an optional feature (SPEC §4): "passthrough",
+--- "hover", "count" or "menu". Everything else a 0.3 host does, it does.
+function Caps:has(feature)
+	return has(self.features, feature)
 end
 
 --- Whether the terminal's scheme is light.
@@ -1085,14 +1237,254 @@ function Caps:light()
 	return self.scheme == "light"
 end
 
---- A cell's size in CSS pixels: cell divided by scale (1 when absent), and
---- a usual 9 x 18 when the host gave no cell.
-function Caps:cell_css()
-	local s = (self.scale and self.scale > 0) and self.scale or 1
-	if not self.cell or self.cell.w <= 0 or self.cell.h <= 0 then
-		return 9, 18
+-- For hosts and relays (SDK.md §3.4.3, §3.4) --------------------------------------
+
+local OP_NAMES = {}
+for _, name in ipairs(M.OPS) do
+	OP_NAMES[name] = true
+end
+
+-- A fault in a command a host or relay reads: an EINVAL error, naming the op
+-- at fault by its index from 0 when there is one.
+local function invalid(m, detail, op)
+	return M.error(M.EINVAL, detail, m.control.a, m.control.s, op)
+end
+
+-- The elements of a decoded array, 1 to n: n counts the holes and
+-- extensions too.
+local function array_len(t, marks)
+	local n = 0
+	for i in pairs(t) do
+		n = math.max(n, i)
 	end
-	return self.cell.w / s, self.cell.h / s
+	for i in pairs(marks or NO_KINDS) do
+		n = math.max(n, i)
+	end
+	return n
+end
+
+--- A delta command's ops (SPEC §6.1), as a host or a relay reads them,
+--- checking the whole body first: a list of ops, each a table with op,
+--- target, key and value (nil where the body has none). nil and an error
+--- (EINVAL, with op, the index of the first op at fault from 0, when there
+--- is one) when the body does not decode (SPEC §3.3) or has no ops, an op is
+--- not a map, holds op, t, k or v as anything but a str, or names an op
+--- there is none of, an op lacks the t or k it needs (an empty one is
+--- none), or a reveal has a value other than start or end. A value an op
+--- does not take is ignored, and so is a key this SDK does not know.
+function M.delta_of(m)
+	if m.control.a ~= "delta" then
+		return nil, invalid(m, "not a delta command")
+	end
+	local v, kinds = m:body()
+	if not v then
+		return nil, invalid(m, "body does not decode")
+	end
+	kinds = type(kinds) == "table" and kinds or NO_KINDS
+	local ops = v.ops
+	if ops == nil and (kinds[v] or NO_KINDS).ops == nil then
+		return nil, invalid(m, "no ops")
+	elseif (kinds[v] or NO_KINDS).ops ~= "array" then
+		return nil, invalid(m, "body does not decode")
+	end
+	local marks = kinds[ops]
+	local n = array_len(ops, marks)
+	local out = {}
+	for i = 1, n do
+		local o = ops[i]
+		local omarks = kinds[o]
+		if type(o) ~= "table" or (marks and marks[i]) then
+			return nil, invalid(m, "op is not a map of strs", i - 1)
+		end
+		for _, f in ipairs({ "op", "t", "k", "v" }) do
+			local x = o[f]
+			if (x ~= nil and type(x) ~= "string") or (omarks and omarks[f]) then
+				return nil, invalid(m, "op is not a map of strs", i - 1)
+			end
+		end
+		out[i] = { op = o.op, target = o.t, key = o.k, value = o.v }
+	end
+	if n == 0 then
+		return nil, invalid(m, "no ops")
+	end
+	for i, o in ipairs(out) do
+		local name = o.op or ""
+		if not OP_NAMES[name] then
+			return nil, invalid(m, "unknown op " .. name, i - 1)
+		elseif (o.target == nil or o.target == "") and name ~= "morph" then
+			return nil, invalid(m, "missing t", i - 1)
+		elseif (o.key == nil or o.key == "") and (name == "attr" or name == "unattr" or name == "var") then
+			return nil, invalid(m, "missing k", i - 1)
+		elseif name == "reveal" and o.value ~= nil and o.value ~= "start" and o.value ~= "end" then
+			return nil, invalid(m, "reveal " .. o.value, i - 1)
+		end
+	end
+	return out
+end
+
+-- The types of a menu's body (SPEC §10.7).
+local MENU_ITEM = { key = "str", label = "str", name = "str", enabled = "bool" }
+local MENU = { label = "str" }
+
+-- Whether items, a decoded array, is a list of menu items (kinds marking its
+-- entries), their own items too, at any depth.
+local function menu_items(items, marks, kinds)
+	if marks ~= nil then
+		for _ in pairs(marks) do
+			return false -- an item is a map, which carries no mark
+		end
+	end
+	for i = 1, array_len(items, marks) do
+		local it = items[i]
+		if type(it) ~= "table" or not typed(it, MENU_ITEM, nil, kinds) then
+			return false
+		end
+		local im = kinds[it]
+		if it.items ~= nil or (im and im.items) then
+			if not (im and im.items == "array") then
+				return false
+			end
+			if not menu_items(it.items, kinds[it.items], kinds) then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- How deep items nest, the first level being one.
+local function menu_depth(items)
+	local d = 0
+	for _, it in ipairs(items) do
+		d = math.max(d, menu_depth(it.items))
+	end
+	return #items > 0 and d + 1 or 0
+end
+
+-- A menu's items as a tree reads them: key, label and name "" where
+-- absent, enabled false where absent, and items an empty list.
+local function menu_copy(items)
+	local out = {}
+	for i, it in ipairs(items or {}) do
+		out[i] = {
+			key = it.key or "",
+			label = it.label or "",
+			name = it.name or "",
+			enabled = it.enabled == true,
+			items = menu_copy(it.items),
+		}
+	end
+	return out
+end
+
+--- An a=menu command's menu (SPEC §10.7), as a host or a relay reads it: a
+--- tree, { label, items = { { key, label, name, enabled, items }… } }, with
+--- "" for what the body leaves out, enabled false where it is absent, and
+--- items {} for an item that is no group. nil, and no error, for a command
+--- with no body, which leaves the program no menu. nil and an error (EINVAL)
+--- for a body that is no menu, holds a field of another type, or nests its
+--- items deeper than MENU_DEPTH. A command with show is not a menu: menu_show_of
+--- reads it.
+function M.menu_of(m)
+	if m.control.a ~= "menu" then
+		return nil, invalid(m, "not a menu command")
+	end
+	if m.payload == "" then
+		return nil
+	end
+	local v, kinds = m:body()
+	if not v or not typed(v, MENU, nil, type(kinds) == "table" and kinds or NO_KINDS) then
+		return nil, invalid(m, "body does not decode")
+	end
+	kinds = type(kinds) == "table" and kinds or NO_KINDS
+	local marks = kinds[v]
+	local items = v.items
+	if items ~= nil or (marks and marks.items) then
+		if not (marks and marks.items == "array") or not menu_items(items, kinds[items], kinds) then
+			return nil, invalid(m, "body does not decode")
+		end
+	end
+	local tree = { label = v.label or "", items = menu_copy(items) }
+	if menu_depth(tree.items) > M.MENU_DEPTH then
+		return nil, invalid(m, "items nest deeper than eight")
+	end
+	return tree
+end
+
+--- An a=menu command's show body (SPEC §10.7), as a host or a relay reads it:
+--- the keys typed, as the program names them, whose level to show, a list. No
+--- body, or none in it, is the top level: an empty list, and no error. A
+--- body that is no map, or whose seq is not an array of str, is nil and an
+--- error (EINVAL).
+function M.menu_show_of(m)
+	if m.control.a ~= "menu" then
+		return nil, invalid(m, "not a menu command")
+	end
+	if m.payload == "" then
+		return {}
+	end
+	local v, kinds = m:body()
+	if not v or not typed(v, { seq = { "str" } }, nil, type(kinds) == "table" and kinds or NO_KINDS) then
+		return nil, invalid(m, "seq is not an array of str")
+	end
+	local out = {}
+	for i, k in ipairs(v.seq or {}) do
+		out[i] = k
+	end
+	return out
+end
+
+--- The level of tree that the keys seq reach (SPEC §10.7): its items, a
+--- group's, for a host to show those that have a key. From the top level,
+--- each key of seq enters the first group (an item with items) at the level
+--- whose key is that key, compared as read_key compares: with Mod read as
+--- platform ({mod, edit}, or nil for Control) reads it. With no keys it is
+--- the top level. nil when the keys reach no group, or tree is nil.
+function M.menu_level_of(tree, platform, seq)
+	if not tree then
+		return nil
+	end
+	local items = tree.items
+	for _, key in ipairs(seq or {}) do
+		local typed_ = M.read_key(platform, key)
+		if not typed_ then
+			return nil
+		end
+		local next_
+		for _, it in ipairs(items) do
+			if it.items and #it.items > 0 and M.read_key(platform, it.key or "") == typed_ then
+				next_ = it
+				break
+			end
+		end
+		if not next_ then
+			return nil
+		end
+		items = next_.items
+	end
+	return items
+end
+
+--- The first item of tree named name, depth first (SPEC §10.7), or nil: a
+--- pick of name is for it. An item with no name, as name "" asks for, is
+--- never found.
+function M.menu_find(tree, name)
+	if not tree or name == nil or name == "" then
+		return nil
+	end
+	local function find_in(items)
+		for _, it in ipairs(items or {}) do
+			if it.name == name then
+				return it
+			end
+			local f = find_in(it.items)
+			if f then
+				return f
+			end
+		end
+		return nil
+	end
+	return find_in(tree.items)
 end
 
 -- Decoder (SDK.md §3.6) ---------------------------------------------------------
@@ -1636,6 +2028,7 @@ M.keymap = keys.keymap
 M.parse_keymap = keys.parse_keymap
 M.resolve = keys.resolve
 M.platform_of = keys.platform_of
+M.read_key = keys.read_key
 M.default_edit = keys.default_edit
 
 -- A field in cells (SDK.md §4.6) --------------------------------------------------
