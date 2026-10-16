@@ -41,6 +41,7 @@ M.ACTIONS = {
 	"newline",
 	"submit",
 	"program",
+	"prefix",
 	"copy",
 	"cut",
 	"paste",
@@ -669,7 +670,7 @@ function Keymap:lookup(key)
 	end
 	local a, mods, value = self:bound(k)
 	if a then
-		if a == "program" or (M.MULTILINE_ACTIONS[a] and not self.multiline) then
+		if a == "program" or a == "prefix" or (M.MULTILINE_ACTIONS[a] and not self.multiline) then
 			return nil
 		end
 		return a
@@ -695,15 +696,27 @@ function Keymap:selects(key)
 end
 
 --- Whether the keymap gives a key to the program (SDK.md §3.10): it binds
---- the key to program, or, for a key with Shift it does not bind, the key
---- without Shift. On an element that is not a text field, a host asks it of
+--- the key to program or prefix, or, for a key with Shift it does not bind,
+--- the key without Shift. On an element that is not a text field, a host asks it of
 --- the element's keymap, parse_keymap of its data-keys values joined with a
 --- space, the root's first, with no default keymap; a key it gives reaches
 --- the program before the element or a scroll uses it (SPEC §10.2, keys for
 --- the program).
 function Keymap:program(key)
 	local k = M.parse_key(key)
-	return k ~= nil and self:bound(self:read(k)) == "program"
+	local a = k and self:bound(self:read(k))
+	return a == "program" or a == "prefix"
+end
+
+--- Whether the keymap binds a key to prefix, with the same fallback without
+--- Shift as program (SDK.md §3.10). A host asks it of a key program gives the
+--- program, and from then on gives the program every key, Tab, Shift+Tab and
+--- Escape too, until the program sends a=focus or a=blur, the surface loses
+--- the keyboard, or the user focuses an element of it with a press (SPEC
+--- §10.5).
+function Keymap:prefix(key)
+	local k = M.parse_key(key)
+	return k ~= nil and self:bound(self:read(k)) == "prefix"
 end
 
 --- The scroll action the keymap binds a key to, with the same fallback
@@ -760,6 +773,17 @@ function M.default_edit(mod)
 		e.redo[2] = "Control+y"
 	end
 	return e
+end
+
+--- A key's name as the platform reads it (SPEC §10.4): its canonical name
+--- (parse_key) with Mod read as the platform's ({mod, edit}, or nil for
+--- Control), so that where Mod is Control "Mod+a" and "Control+a" read alike,
+--- and where it is Meta they are two keys. A menu's items (their key,
+--- menu_level_of) compare with the keys typed this way. nil for a name that
+--- does not parse.
+function M.read_key(platform, name)
+	local k = M.parse_key(name)
+	return k and M.keymap(false, platform):read(k)
 end
 
 --- The platform of a host's capabilities (SDK.md §3.10): {mod, edit}, the
