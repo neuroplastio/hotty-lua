@@ -156,6 +156,18 @@ local CARD = [[
 	})
 ]]
 
+-- A caps event, as a host sends it: it belongs to no surface.
+local function hotty_caps_event(body)
+	return require("hotty").encode({ { "a", "ev" }, { "e", "caps" } }, body)
+end
+
+-- A delta command's ops, as a host reads them.
+local function ops(entry)
+	local hotty = require("hotty")
+	local _, m = hotty.decoder():feed(hotty.encode({ { "a", entry.a }, { "s", entry.s } }, entry.payload))
+	return assert(hotty.delta_of(m))
+end
+
 local function card(t)
 	t.lua(SETUP)
 	wait(function()
@@ -177,7 +189,7 @@ test("a host: detected native, with its capabilities", function(spawn)
 		return t.lua("return T.mode") == "native"
 	end, "native")
 	eq(t.lua("return T.host"), "fake")
-	eq(t.lua("return T.term.caps.v"), "0.2")
+	eq(t.lua("return T.term.caps.v"), "0.3")
 	eq(t.host.queries, 1)
 	eq(t.host.problems, {})
 	return t
@@ -217,7 +229,7 @@ test(
 		wait(function()
 			return t.host.placements["t-card"] ~= nil
 		end, "the card's placement")
-		eq(t.lua("return T.term.caps.v"), "0.2")
+		eq(t.lua("return T.term.caps.v"), "0.3")
 		eq(t.host.queries, 1)
 		eq(t.host.problems, {})
 		return t
@@ -257,7 +269,7 @@ local HEARD = [[
 ]]
 
 test("a host of another version: its EVERSION is detection's, and the terminal text", function(spawn)
-	local t = spawn({ version = "0.3" })
+	local t = spawn({ version = "0.2" })
 	t.lua(HEARD .. SETUP)
 	wait(function()
 		return t.lua("return T.mode") == "text"
@@ -275,7 +287,7 @@ test("a host of another version: its EVERSION is detection's, and the terminal t
 end)
 
 test("late: a late EVERSION changes nothing, and is detection's", function(spawn)
-	local t = spawn({ native = false, version = "0.3" })
+	local t = spawn({ native = false, version = "0.2" })
 	t.lua(HEARD .. SETUP:gsub('prefix = "t",', 'prefix = "t", late = true,'))
 	wait(function()
 		return t.lua("return T.mode") == "text"
@@ -390,9 +402,9 @@ test("a surface below a line: its document once, placed on the row after, room m
 	local doc = t.host:commands("doc", "t-card")
 	eq(#doc, 1)
 	eq(doc[1].payload, "<button id=go>Go</button> <span id=label></span>")
-	eq(doc[1].control.q, "1", "a document answers errors")
+	eq(doc[1].control.q, nil, "a document answers errors: q=1 is implied")
 	eq(doc[1].control.d, nil, "attached")
-	eq(t.host:commands("place", "t-card")[1].control.q, "1")
+	eq(t.host:commands("place", "t-card")[1].control.q, nil)
 	-- Line 6 is three rows lower: on screen row 8 (0-based), where it was on 5.
 	eq(t.lua("return vim.fn.screenpos(0, 6, 1).row"), 9)
 	eq(t.host.problems, {})
@@ -450,10 +462,10 @@ test("a click reaches the surface's handler, whose delta reaches the host", func
 	t.send(t.host:event("t-card", "click", "go"))
 	wait(function()
 		local d = t.host:commands("delta", "t-card")
-		return #d == 1 and d[1].payload == "clicked"
+		return #d == 1
 	end, "the delta")
 	local d = t.host:commands("delta", "t-card")[1]
-	eq({ d.control.op, d.control.t, d.control.q }, { "text", "label", "2" })
+	eq({ ops(d)[1].op, ops(d)[1].target, ops(d)[1].value, d.control.q }, { "text", "label", "clicked", "2" })
 	eq(t.lua("return T.events"), { { kind = "click", target = "go", name = "card" } })
 	return t
 end)
@@ -614,7 +626,8 @@ test("rows auto: measured by the first placement, then room made and clipped as 
 	end, "two placements")
 	local places = t.host:commands("place", "t-auto")
 	eq(places[1].control.r, "auto")
-	eq(places[1].control.q, "0", "numbered, for the rows")
+	eq(places[1].control.n ~= nil, true, "numbered, for the rows")
+	eq(places[1].control.q, nil, "n alone asks for the reply")
 	eq(places[#places].control.r, "2")
 	wait(function()
 		return t.lua("return vim.fn.screenpos(0, 2, 1).row") == 4
@@ -670,6 +683,50 @@ test("relayout(true) places every surface again, changed or not", function(spawn
 	return t
 end)
 
+test("p, f and v belong to the surface: sent when they change, not with every placement", function(spawn)
+	local t = spawn()
+	card(t)
+	local function places()
+		return t.host:commands("place", "t-card")
+	end
+	eq({ places()[1].control.p, places()[1].control.f, places()[1].control.v }, {}, "none wanted: none sent")
+	t.lua("T.card:set({ press = true, hover = true })")
+	wait(function()
+		return #places() == 2
+	end, "a placement with the flags")
+	eq({ places()[2].control.p, places()[2].control.f, places()[2].control.v }, { "1", nil, "1" })
+	t.lua("T.session:relayout(true)")
+	wait(function()
+		return #places() == 3
+	end, "a placement again")
+	eq({ places()[3].control.p, places()[3].control.v }, {}, "as they were")
+	t.lua("T.card:set({ press = false, fit = true })")
+	wait(function()
+		return #places() == 4
+	end, "a placement with the flags changed")
+	eq({ places()[4].control.p, places()[4].control.f, places()[4].control.v }, { "0", "1", nil })
+	eq(t.host.flags["t-card"], { press = false, fit = true, hover = true })
+	eq(t.host.problems, {})
+	return t
+end)
+
+test("a caps event folds into the terminal's capabilities", function(spawn)
+	local t = spawn()
+	card(t)
+	local mp = require("msgpack_writer")
+	-- cellcss is a map of floats: this detail does not decode.
+	t.send(hotty_caps_event(mp.pack({ cellcss = mp.float(12) })))
+	t.settle()
+	eq(t.lua("return T.term.caps.cell_css.w"), 9, "a detail that does not decode changes nothing")
+	t.send(hotty_caps_event(mp.pack({ cellcss = { w = mp.float(12), h = mp.float(24) }, limits = { surfaces = 5 } })))
+	wait(function()
+		return t.lua("return T.term.caps.cell_css.w") == 12
+	end, "the new cell")
+	eq(t.lua("return T.term.caps.host"), "fake", "what it leaves out stays")
+	eq(t.lua("return T.session.limit"), 5)
+	return t
+end)
+
 -- The terminal's waits ---------------------------------------------------------
 
 test("a request gets its reply; a fence returns when the DA1 behind it arrives", function(spawn)
@@ -721,9 +778,10 @@ test("examples/nvim/click.lua: a button that counts its clicks", function(spawn)
 	t.send(t.host:event("click-example-card", "click", "go"))
 	wait(function()
 		local d = t.host:commands("delta", "click-example-card")
-		return #d == 2 and d[2].payload == "2 clicks"
+		return #d == 2
 	end, "two deltas")
-	eq(t.host:commands("delta", "click-example-card")[1].payload, "1 click")
+	eq(ops(t.host:commands("delta", "click-example-card")[2])[1].value, "2 clicks")
+	eq(ops(t.host:commands("delta", "click-example-card")[1])[1].value, "1 click")
 	-- The second blur may come in a later read than the second delta.
 	wait(function()
 		return #t.host:commands("blur", "click-example-card") == 2

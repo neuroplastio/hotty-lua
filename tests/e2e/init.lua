@@ -39,8 +39,8 @@ vim.api.nvim_create_autocmd("VimEnter", {
 		end)
 		hn.term():detect(function(mode, caps)
 			local w, h = 0, 0
-			if caps then
-				w, h = caps:cell_css()
+			if caps and caps.cell_css then
+				w, h = caps.cell_css.w, caps.cell_css.h
 			end
 			log("MODE", mode, caps and { host = caps.host, version = caps.version, v = caps.v } or nil)
 			log("CELL", w, h)

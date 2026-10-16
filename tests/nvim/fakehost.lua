@@ -7,7 +7,7 @@
 --     ESC 7 / ESC 8, so it knows where each placement lands, and an erase in
 --     display (ED 2 or 3) drops every placement, as hottyterm does;
 --   - the host (when native): the query, answered in the one version it
---     speaks (version, "0.2") or with EVERSION, and every command, kept as
+--     speaks (version, "0.3") or with EVERSION, and every command, kept as
 --     surfaces and placements, with replies as SPEC §3.6 has them. It lays
 --     nothing out: r=auto gets auto_rows;
 --   - not a host, a multiplexer's pane with no terminal attached: it holds a
@@ -25,10 +25,10 @@ local Host = {}
 Host.__index = Host
 
 local DEFAULT_CAPS = mp.pack({
-	v = "0.2",
-	events = { "click", "change", "input", "submit", "press", "focus", "blur", "resize", "fit", "hover", "drag" },
-	cell = { w = 9, h = 18 },
+	v = "0.3",
+	cellcss = { w = mp.float(9), h = mp.float(18) },
 	scale = mp.float(1),
+	features = { "hover", "count", "menu" },
 	scheme = "dark",
 	-- message: the limit its decoder keeps (SPEC §13).
 	limits = { surfaces = 64, message = hotty.DEFAULT_MAX },
@@ -40,7 +40,7 @@ function M.new(opts)
 	opts = opts or {}
 	return setmetatable({
 		native = opts.native ~= false,
-		version = opts.version or "0.2", -- the one version it speaks
+		version = opts.version or "0.3", -- the one version it speaks
 		caps = opts.caps or DEFAULT_CAPS,
 		auto_rows = opts.auto_rows or 4,
 		scanner = hotty.scanner(),
@@ -50,6 +50,7 @@ function M.new(opts)
 		saved = { x = 0, y = 0 },
 		docs = {}, -- surface to { html, detached }
 		placements = {}, -- surface to { x, y, c, r, window, z, p, f, v, C }
+		flags = {}, -- surface to { p, f, v }: they belong to the surface (SPEC §5.2)
 		log = {}, -- every HOTTY command, in order: { a, s, control, payload }
 		queries = 0,
 		held = nil, -- the n of a query held for a late answer
@@ -63,10 +64,16 @@ local function reply(ctl, payload)
 	return hotty.encode(ctl, payload)
 end
 
+-- The quiet level of a command (SPEC §3.5): its q, else 0 with n and 1
+-- without.
+local function quiet(c)
+	return tonumber(c.q or (c.n and "0" or "1")) or 1
+end
+
 -- Answers a command as SPEC §3.6 has hosts do: an error unless q is 2, an ok
 -- only when q is 0.
-function Host:answer(m, err, extra)
-	local q = tonumber(m.control.q or "0") or 0
+function Host:answer(m, err, extra, detail)
+	local q = quiet(m.control)
 	local ctl = { { "a", err and "err" or "ok" } }
 	if m.control.n then
 		ctl[#ctl + 1] = { "n", m.control.n }
@@ -82,7 +89,7 @@ function Host:answer(m, err, extra)
 		if q >= 2 then
 			return ""
 		end
-		return reply(ctl, mp.pack({ code = err, detail = m.control.s or "" }))
+		return reply(ctl, mp.pack({ code = err, detail = detail or m.control.s or "" }))
 	end
 	if q ~= 0 then
 		return ""
@@ -152,6 +159,7 @@ function Host:command(m)
 	local s = c.s
 	if c.a == "doc" then
 		self.docs[s] = { html = m.payload, detached = c.d == "1" }
+		self.flags[s] = self.flags[s] or {}
 		return self:answer(m)
 	elseif c.a == "place" then
 		if not self.docs[s] then
@@ -163,12 +171,30 @@ function Host:command(m)
 		if c.x then
 			p.window = { x = tonumber(c.x), y = tonumber(c.y), w = tonumber(c.w), h = tonumber(c.h) }
 		end
-		p.z, p.press, p.fit, p.hover, p.C = tonumber(c.z), c.p == "1", c.f == "1", c.v == "1", c.C == "1"
+		p.z, p.C = tonumber(c.z), c.C == "1"
+		-- p, f and v are the surface's: 1 on, 0 off, held; any other value is
+		-- as if absent.
+		local fl = self.flags[s]
+		for key, field in pairs({ p = "press", f = "fit", v = "hover" }) do
+			if c[key] == "1" then
+				fl[field] = true
+			elseif c[key] == "0" then
+				fl[field] = false
+			end
+			p[field] = fl[field] == true
+		end
 		self.placements[s] = p
 		return self:answer(m, nil, { { "c", tostring(cols) }, { "r", tostring(rows) } })
 	elseif c.a == "hide" or c.a == "delta" or c.a == "detach" or c.a == "focus" or c.a == "blur" then
 		if not self.docs[s] then
 			return self:answer(m, "ENOENT")
+		end
+		if c.a == "delta" then
+			local _, err = hotty.delta_of(m)
+			if err then
+				self.problems[#self.problems + 1] = "a delta the host refuses: " .. err.detail
+				return self:answer(m, "EINVAL", err.op and { { "i", tostring(err.op) } } or nil, err.detail)
+			end
 		end
 		if c.a == "hide" then
 			self.placements[s] = nil
@@ -181,9 +207,9 @@ function Host:command(m)
 			if not self.docs[s] then
 				return self:answer(m, "ENOENT")
 			end
-			self.docs[s], self.placements[s] = nil, nil
+			self.docs[s], self.placements[s], self.flags[s] = nil, nil, nil
 		elseif not c.id then
-			self.docs, self.placements = {}, {}
+			self.docs, self.placements, self.flags = {}, {}, {}
 		end
 		return self:answer(m)
 	elseif c.a == "res" then
@@ -269,7 +295,11 @@ end
 --- An event, as the host sends it; detail is a table, written as msgpack.
 function Host:event(surface, kind, target, detail)
 	local body = detail and mp.pack(detail) or nil
-	return hotty.encode({ { "a", "ev" }, { "s", surface }, { "e", kind }, { "t", target or "" } }, body)
+	local ctl = { { "a", "ev" }, { "s", surface }, { "e", kind } }
+	if target and target ~= "" then
+		ctl[#ctl + 1] = { "t", target } -- absent where no element is meant (SPEC §9)
+	end
+	return hotty.encode(ctl, body)
 end
 
 --- The terminal becomes a host, as one attaching to a multiplexer's pane
@@ -288,7 +318,7 @@ end
 
 --- The host forgets every surface, as a full reset does.
 function Host:forget()
-	self.docs, self.placements = {}, {}
+	self.docs, self.placements, self.flags = {}, {}, {}
 end
 
 --- The commands logged, of action a (and surface s).
