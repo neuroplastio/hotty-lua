@@ -49,7 +49,7 @@ session:surface("card", {
 		-- The user clicked: a=ev:s=click-example-card:e=click:t=go
 		if ev.kind == hotty.EVENT_CLICK and ev.target == "go" then
 			clicks = clicks + 1
-			-- The program answers with a delta: a=delta:op=text:t=count
+			-- The program answers with a delta: a=delta, one text op for t=count
 			surface:set_text("count", clicks == 1 and "1 click" or (clicks .. " clicks"))
 			-- A button takes the keyboard when clicked (SPEC §10.1), and would
 			-- keep Enter and Space from the editor: give it back (a=blur).

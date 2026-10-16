@@ -11,7 +11,8 @@ agreed on 2026-10-07 (plexos `vault/tasks/hotty-sdks.md`, HOTTY-LUA-01).
   preloads it into every script's state, so `require("hotty")` works with
   no `package.path`. `make hotty-lua REV=<sha>` in plexos refreshes the copy.
   From HOTTY 0.2 the copy has `hotty.msgpack` and `hotty.utf8`, and no
-  `hotty.json`.
+  `hotty.json`. HOTTY 0.3 changes no seam; its delta and menu are written in
+  `init.lua`.
   The state is gopher-lua v1.1.2 with every standard library, no `bit`, and
   a registry raised for `table.concat` over many strings. `make check` here
   runs the conformance vectors and the unit tests under glua v1.1.2, the
@@ -134,7 +135,7 @@ no fences. What plx-script gives it, as agreed:
    `on_hotty_caps(ctx, raw)`, raw nil for none, before the `on_show` it
    causes; it draws no frame itself. The adapter reads `hotty.caps(raw)`
    and sends its documents again. Capabilities that do not decode, or whose
-   `v` is not the version this hotty-lua speaks (`hotty.VERSION`, `"0.2"`),
+   `v` is not the version this hotty-lua speaks (`hotty.VERSION`, `"0.3"`),
    none included, are no host (SPEC §4).
 2. **Sending.** `ctx:hotty_send(s)` writes HOTTY commands (the builders'
    strings) for the script's own surfaces to the instance's output, in
@@ -175,7 +176,10 @@ no fences. What plx-script gives it, as agreed:
    out on it.
 6. **Geometry.** `ctx:size()` is the instance's cells, and
    `on_resize(ctx, cols, rows)` runs before the frame at the new size (a
-   rail's rows are 1). A cell's pixels are in the caps (`cell`, `scale`).
+   rail's rows are 1). A cell's size in CSS pixels is in the caps (`cellcss`). A `caps` event
+   (SPEC §9) belongs to no surface, so whether plx routes one to `on_hotty`
+   is plx's to say; hotty.plx folds one into `session.caps` when it does,
+   and plx hands a changed host through `on_hotty_caps` all the same.
 
 `plx.has("hotty_send")` says whether a plx-script has 1–3, and
 `plx.has("after")` whether it has 5. In plexos, 7a37ef4 has the seam,

@@ -5,10 +5,11 @@ HTML Over The TTY. With it, a Lua program shows small HTML documents, called
 surfaces, on rectangles of cells, and hears what the user does in them. It
 is written for two places: Neovim plugins, and plx scripts.
 
-It speaks HOTTY 0.2: a host's replies and events carry msgpack bodies
-(SPEC §3.3), and its query lists the version it speaks (`a=q:n=1:v=0.2`,
-SPEC §4). A terminal of another HOTTY version, a 0.1 one included, is no
-host to it, and the program draws in cells.
+It speaks HOTTY 0.3: a host's replies and events carry msgpack bodies
+(SPEC §3.3), a delta is one list of ops (SPEC §6.1), and its query lists the
+version it speaks (`a=q:n=1:v=0.3`, SPEC §4). A terminal of another HOTTY
+version, a 0.2 one included, is no host to it, and the program draws in
+cells. [Upgrading from 0.2](#upgrading-from-02) lists what callers change.
 
 It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/main/SDK.md)
 in two layers:
@@ -51,18 +52,20 @@ an error.
 
 | SDK.md | hotty |
 | --- | --- |
-| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL` |
+| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `MOD_SHIFT` …, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
-| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `sync` |
-| reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL` |
-| Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover`, `keep_cursor` |
+| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `sync` |
+| ops (§3.4.3) | `morph`, `inner`, `replace`, `append`, `prepend`, `before`, `after`, `remove`, `attr`, `unattr`, `text`, `var`, `reveal_op`: each returns an op, a table with `op`, `target`, `key` and `value`; `delta(surface, ops, opts)` sends a list of them as one delta |
+| reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL`. `q` goes out only where the wire does not imply it |
+| Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover` (`true` is on, `false` is off, `nil` sends nothing: they belong to the surface), `keep_cursor` |
+| a host or a relay | `delta_of(msg)` (the ops, or `nil` and an EINVAL error with `op` the index at fault), `menu_of(msg)`, `menu_show_of(msg)`, `menu_level_of(tree, platform, seq)`, `menu_find(tree, name)`, `read_key(platform, name)` |
 | names (§3.5) | `valid_name(s)`, `surface_name(s)` |
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
-| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(platform, value)`, `resolve(platform, multiline, value…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
-| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`; `event:value()`, `:checked()`, `:fields()`, `:link()`, `:size()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.scroll` and the other fields; `caps:supports(op)`, `:sends(kind)`, `:drags()`, `:hovers()`, `:views()`, `:light()`, `:cell_css()` |
+| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(platform, value)`, `resolve(platform, multiline, value…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:prefix(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
+| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`, `reply.op`; `event:value()`, `:checked()`, `:fields()`, `:mods()`, `:link()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.cell_css`, `caps.features` and the other fields; `caps:has(feature)`, `:light()` |
 
 Where Lua differs:
 
@@ -71,10 +74,22 @@ Where Lua differs:
 - **Segments** are tables, `{ kind = "pass" | "osc" | "da1", data = … }`.
 - **A message's control** is a table of keys to values, and `msg.keys` lists
   the keys in the order they came.
-- **`link()` and `size()`** return two values (`href, url`; `w, h`), and
-  `cell_css()` returns `w, h`. `drag()`, `hover()`, `area()` and `view()`
-  return tables; `view()`'s is `{ areas = { [id] = area }, at_end = bool }`,
-  from the wire's `in` and `end`, which are keywords.
+- **`link()`** returns two values (`href, url`). `drag()`, `hover()`,
+  `area()` and `view()` return tables; `view()`'s is
+  `{ areas = { [id] = area }, at_end = bool }`, from the wire's `in` and
+  `end`, which are keywords. `fields()` is a list of `{ name, value }` pairs,
+  and `mods()` the modifier bits (`MOD_SHIFT` …), 0 when there are none.
+- **`caps.cell_css`** is `{ w, h }` in CSS pixels, `nil` when the host said
+  none. `reply.op` and an error's `op` are the index of the op at fault as the
+  wire has it, from 0, `nil` when there is none.
+- **Op builders** take the names SDK.md's Appendix A gives Lua: `hotty.text`,
+  `hotty.attr`, `hotty.var` and the rest, and `reveal_op` for `RevealOp`.
+  An op is a plain table, `{ op = "text", target = "n", value = "1" }`; its
+  `value` is `nil` for an op that takes none.
+- **A menu** is a table, `{ label, items = { { key, label, name, enabled,
+  items } } }`; `enabled` is true when `nil`. `menu_of` reads one the same
+  way, with `""` for what the body leaves out and `enabled` false where it is
+  absent.
 - **The scroll axes** are also `scroll_vertical` and `scroll_horizontal`,
   as SDK.md's Appendix A spells them for Lua; every other constant here is
   in upper case.
@@ -86,13 +101,16 @@ Where Lua differs:
   `graphemes` (SDK.md §4.6). `parse_key` makes a capital of a letter with
   Shift in ASCII, Latin-1 and the basic Greek and Cyrillic alphabets.
 - **zlib.** Lua has none. `encode` compresses only when given a compressor
-  (`opts.compress`, from bytes to zlib bytes), and a host never compresses
-  what it sends (SPEC §3.3). The Decoder inflates `o=z` itself, with a
+  (`opts.compress`, from bytes to zlib bytes; SDK.md §3.3 has it run at
+  zlib's default level, 6), and a host never compresses what it sends (SPEC
+  §3.3). The Decoder inflates `o=z` itself, with a
   small inflate in Lua, for a relay or a test that reads a program's output.
   It stops at the decoder's `max` (`opts.max`, 16 MiB by default), as it
   stops joining the chunks of a message that would decode past it.
-- **msgpack.** Lua has none either, and a host's bodies are msgpack (SPEC
-  §3.3): `hotty.msgpack.decode` reads them, in Lua. `msg:body()` is the
+- **msgpack.** Lua has none either. A host's bodies are msgpack (SPEC
+  §3.3): `hotty.msgpack.decode` reads them, in Lua. A delta's ops and a menu
+  are written by `delta` and `menu`, each str, array and map in the
+  smallest form of its header. `msg:body()` is the
   body it decoded, a map, as a table with no metatable, and its kinds.
 - **Numbers are doubles** in Lua 5.1, LuaJIT and gopher-lua, so `7` and
   `7.0` are one number, and a table is a map or an array. So
@@ -102,6 +120,43 @@ Where Lua differs:
   SDK: `7.0` in an int field, `2` in a float one, or `[]` in a map one,
   and the body does not decode. An int further than 2^53 − 1 from 0 does
   not decode either. [`docs/plx.md`](docs/plx.md) has the contract.
+
+## Upgrading from 0.2
+
+What a caller changes (SDK.md Appendix C):
+
+- **`delta(surface, op, target, key, payload, opts)` is
+  `delta(surface, ops, opts)`**, the ops built by `hotty.text`, `hotty.attr`
+  and the rest. A frame's changes to one surface go in one delta. The
+  one-op helpers (`set_text`, `set_var`, `set_attr`, `remove_attr`,
+  `morph_to`, `reveal`) stay, and so do the sessions' `surface:set_text(…)`
+  and the like; `surface:delta(op, target, key, payload, opts)` is
+  `surface:delta(ops, opts)`.
+- **`press`, `fit` and `hover` belong to the surface.** In a placement,
+  `nil` sends nothing and leaves the flag as it was, `true` turns it on
+  (`p=1`) and `false` off (`p=0`). A program that placed a surface without
+  `press` to stop its presses now sends `press = false`. The sessions send
+  them when they change.
+- **Ask by feature.** `caps:supports`, `:sends`, `:drags`, `:hovers` and
+  `:views`, and the fields `ops`, `events`, `passthrough`, `scroll`, `steps`,
+  `drop`, `count`, `keys` and `menu` are gone: `caps:has(feature)` answers for
+  `passthrough`, `hover`, `count` and `menu`.
+- **The cell is in CSS pixels.** `caps.cell` and `caps:cell_css()` are
+  `caps.cell_css`, a table `{ w, h }` or `nil`; there is no `resize` event
+  or `ev:size()`: a new font is a `caps` event, which `caps:merge` folds in.
+  The sessions keep `caps` current (`term.caps`, `session.caps`) and call
+  `on_caps(caps, changed)`.
+- **A submit's `ev:fields()`** is a list of `{ name, value }` pairs, in
+  order, not a table by name.
+- **A drag's `keys`** are `ev:mods()`, bits; clicks and presses carry them.
+- **`hotty.menu(level)` is `hotty.menu(tree)`** with `name` and nested
+  `items` in place of `seq`, `group` and the level a key reaches; send the
+  tree when what the program can do changes, `menu_show(keys)` for each
+  key of a sequence, and `menu_hide()` when it ends. A key sequence is the
+  program's: bind its leader to `prefix` in the keymap.
+- **`q` is left out where the wire implies it.** `{ n = 4 }` alone asks
+  for the reply; a fake host answers a command without `q` only with an
+  error.
 
 ## A field in cells
 
@@ -190,6 +245,8 @@ session:surface("card", {
 - **Floating windows and the popup menu** are cells, and every placement is
   above the cells (SPEC §5.2), so a surface they would cover is hidden while
   they do (`occlude = false` turns that off).
+- **Flags.** A surface's `press`, `fit` and `hover` are sent with the
+  placement when they change, not with every one (SPEC §5.2).
 - **What the host loses** (`ENOENT` in answer to a placement) is sent again.
   A resize places every surface again: the TUI starts its redraw with an
   erase in display, which takes placements with it (SDK.md §4.3).
@@ -258,7 +315,12 @@ end
   `hide` (with `keep`) or `del` when it went out of view (`shown = false`,
   or past the tool's cells). Each change is laid out at once.
 - **A new host** has none of the surfaces: every document goes again, and
-  `on_ready(mode, caps)` runs. So does an `ENOENT`.
+  `on_ready(mode, caps)` runs. So does an `ENOENT`. A `caps` event the
+  instance is sent folds into `session.caps`, and `on_caps(caps, changed)`
+  runs.
+- **Flags.** A surface's `press`, `fit` and `hover` are sent with the
+  placement when they change, not with every one (SPEC §5.2); a surface the
+  host lost starts from none.
 - **Rows auto** (`rows = nil`): the first placement is numbered, and the
   rows the host chose are kept. plx answers it once the tool is on the
   screen, so the rows may come after the request's 3 s on `plx.after`;

@@ -39,7 +39,7 @@ local session = hplx.session(t, {
 		-- The user clicked: a=ev:s=card:e=click:t=go
 		if ev.kind == hotty.EVENT_CLICK and ev.target == "go" then
 			state.clicks = state.clicks + 1
-			-- The answer is a delta: a=delta:op=text:t=count
+			-- The answer is a delta: a=delta, one text op for t=count
 			surface:set_text("count", count())
 		end
 	end,
