@@ -1,10 +1,10 @@
---- hotty.plx is HOTTY for a plx script (plexos's plx-script): SDK.md §4.2, a
+--- hotty.plx is hotty for a plx script (plexos's plx-script): SDK.md §4.2, a
 --- push environment.
 ---
 --- plx owns the terminal. It knows whether the terminal is a host and hands
 --- the script the host's capabilities (ctx:hotty().raw, and on_hotty_caps
 --- when the host changes); it writes what the script sends (ctx:hotty_send)
---- between its frames; and it hands the script every HOTTY message for its
+--- between its frames; and it hands the script every hotty message for its
 --- surfaces (on_hotty), events and replies alike. Its relay names the
 --- script's surfaces apart from every other program's, places them where the
 --- script's tool or rail is on the screen, moves and clips them with it, and
@@ -151,7 +151,7 @@ function Session:resize(ctx)
 	self:schedule()
 end
 
---- on_hotty: one HOTTY message plx routed to the instance, as the host wrote
+--- on_hotty: one hotty message plx routed to the instance, as the host wrote
 --- it. Returns whether it was this session's.
 function Session:hotty(ctx, seq)
 	self:attach(ctx)

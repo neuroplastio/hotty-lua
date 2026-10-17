@@ -1,6 +1,6 @@
 -- A fake host, for tests of hotty.nvim (the test host of SDK.md §4.4, as
 -- small as those tests need). It reads what a Neovim writes to its terminal
--- and answers as a terminal and a HOTTY host would:
+-- and answers as a terminal and a hotty host would:
 --
 --   - the terminal: DA1, the cursor report (DSR 5n), synchronized output's
 --     DECRQM, the background colour; it follows the cursor through CUP and
@@ -14,7 +14,7 @@
 --     query that asks for a late answer (SPEC §4), until another query takes
 --     its place, and become_host answers it as the host does.
 --
--- Strict: a malformed HOTTY message, or a HOTTY command other than the query
+-- Strict: a malformed hotty message, or a hotty command other than the query
 -- sent to a terminal that is not a host, is recorded in problems.
 
 local hotty = require("hotty")
@@ -51,7 +51,7 @@ function M.new(opts)
 		docs = {}, -- surface to { html, detached }
 		placements = {}, -- surface to { x, y, c, r, window, z, p, f, v, C }
 		flags = {}, -- surface to { p, f, v }: they belong to the surface (SPEC §5.2)
-		log = {}, -- every HOTTY command, in order: { a, s, control, payload }
+		log = {}, -- every hotty command, in order: { a, s, control, payload }
 		queries = 0,
 		held = nil, -- the n of a query held for a late answer
 		held_query = nil, -- its control
@@ -152,7 +152,7 @@ function Host:command(m)
 		return self:query_reply(c)
 	end
 	if not self.native then
-		self.problems[#self.problems + 1] = "a HOTTY command sent to a terminal that is not a host: a=" .. tostring(c.a)
+		self.problems[#self.problems + 1] = "a hotty command sent to a terminal that is not a host: a=" .. tostring(c.a)
 		return ""
 	end
 	self.log[#self.log + 1] = entry
@@ -218,7 +218,7 @@ function Host:command(m)
 	return self:answer(m, "EINVAL")
 end
 
--- What the terminal answers in the bytes that are not HOTTY's, and the
+-- What the terminal answers in the bytes that are not hotty's, and the
 -- cursor's moves.
 function Host:terminal(data)
 	data = self.carry .. data
@@ -283,7 +283,7 @@ function Host:feed(data)
 			if result == hotty.COMPLETE then
 				out[#out + 1] = self:command(m)
 			elseif result == hotty.INVALID then
-				self.problems[#self.problems + 1] = "a malformed HOTTY message: " .. seg.data:sub(1, 60)
+				self.problems[#self.problems + 1] = "a malformed hotty message: " .. seg.data:sub(1, 60)
 			end
 		else
 			out[#out + 1] = self:terminal(seg.data)

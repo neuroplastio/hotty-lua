@@ -10,15 +10,15 @@ agreed on 2026-10-07 (plexos `vault/tasks/hotty-sdks.md`, HOTTY-LUA-01).
   a pinned copy of `lua/hotty/` (all but `nvim.lua`), embeds it, and
   preloads it into every script's state, so `require("hotty")` works with
   no `package.path`. `make hotty-lua REV=<sha>` in plexos refreshes the copy.
-  From HOTTY 0.2 the copy has `hotty.msgpack` and `hotty.utf8`, and no
-  `hotty.json`. HOTTY 0.3 and 0.4 change no seam; the delta, the menu and
+  From hotty 0.2 the copy has `hotty.msgpack` and `hotty.utf8`, and no
+  `hotty.json`. hotty 0.3 and 0.4 change no seam; the delta, the menu and
   the key names are written in `init.lua` and `keys.lua`.
   The state is gopher-lua v1.1.2 with every standard library, no `bit`, and
   a registry raised for `table.concat` over many strings. `make check` here
   runs the conformance vectors and the unit tests under glua v1.1.2, the
   same interpreter.
 - **A program in a pane needs nothing.** A pure Lua program (luajit,
-  lua5.1, glua) in a plx pane that speaks HOTTY on its own terminal is
+  lua5.1, glua) in a plx pane that speaks hotty on its own terminal is
   already served by plx: plxd answers its query, `pkg/hottyrelay` names its
   surfaces, places them in the pane, and writes its events back to its
   input. With the wire layer it would read its terminal raw, with
@@ -129,7 +129,7 @@ no fences. What plx-script gives it, as agreed:
 
 1. **The caps, whole.** `ctx:hotty()` keeps `{ v, host, scheme, dark }`
    (nil for no host) and gains `raw`, the capabilities as the host sent
-   them: from HOTTY 0.2 the msgpack body of its reply to plx's query, the
+   them: from hotty 0.2 the msgpack body of its reply to plx's query, the
    bytes after base64 (0.1's was JSON; plexos MSGPACK-HOTTY). A change of
    host, and only a change (never the start), calls
    `on_hotty_caps(ctx, raw)`, raw nil for none, before the `on_show` it
@@ -137,7 +137,7 @@ no fences. What plx-script gives it, as agreed:
    and sends its documents again. Capabilities that do not decode, or whose
    `v` is not the version this hotty-lua speaks (`hotty.VERSION`, `"0.4"`),
    none included, are no host (SPEC §4).
-2. **Sending.** `ctx:hotty_send(s)` writes HOTTY commands (the builders'
+2. **Sending.** `ctx:hotty_send(s)` writes hotty commands (the builders'
    strings) for the script's own surfaces to the instance's output, in
    order with plx's frames and never inside one. The relay prefixes the
    names, and places them in the instance's own cells, moved and clipped
@@ -146,7 +146,7 @@ no fences. What plx-script gives it, as agreed:
    sending nothing, when there is none; and false and an error when the
    write fails. The relay takes `res`, `del`, `doc`, `delta`, `focus`,
    `blur`, `hide` and `place`, and ignores `detach`.
-3. **Input.** `on_hotty(ctx, seq)` gets every HOTTY message plx routes to
+3. **Input.** `on_hotty(ctx, seq)` gets every hotty message plx routes to
    the instance, events and replies, each as one complete OSC 7279 sequence
    the way a host writes it (a long one chunked, several calls), never
    compressed, the surface named as the script named it. The adapter feeds

@@ -1,4 +1,4 @@
---- hotty.nvim is HOTTY for a Neovim plugin: SDK.md §4.2, a push environment.
+--- hotty.nvim is hotty for a Neovim plugin: SDK.md §4.2, a push environment.
 ---
 --- Neovim owns the terminal. Its TUI parses the input and raises
 --- TermResponse with each OSC sequence, without its terminator, and with each

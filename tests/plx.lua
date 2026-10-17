@@ -112,7 +112,7 @@ local function new_ctx(raw, cols, rows)
 	return ctx
 end
 
--- The HOTTY commands sent since the last call, each { a, s, control,
+-- The hotty commands sent since the last call, each { a, s, control,
 -- payload, at }, at being the cell a CUP before it moved to, from 0.
 local function sent(ctx)
 	local scanner, decoder = hotty.scanner(), hotty.decoder()

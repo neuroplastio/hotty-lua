@@ -1,14 +1,14 @@
 # hotty-lua
 
-hotty-lua is the Lua SDK for [HOTTY](https://github.com/neuroplastio/hotty),
-HTML Over The TTY. With it, a Lua program shows small HTML documents, called
+hotty-lua is the Lua SDK for [hotty](https://github.com/neuroplastio/hotty),
+HTML over the TTY. With it, a Lua program shows small HTML documents, called
 surfaces, on rectangles of cells, and hears what the user does in them. It
 is written for two places: Neovim plugins, and plx scripts.
 
-It speaks HOTTY 0.4: a host's replies and events carry msgpack bodies
+It speaks hotty 0.4: a host's replies and events carry msgpack bodies
 (SPEC §3.3), a delta is one list of ops (SPEC §6.1), keys are named as
 myelin key names 0.1 names them (SPEC §10.4), and its query lists the
-version it speaks (`a=q:n=1:v=0.4`, SPEC §4). A terminal of another HOTTY
+version it speaks (`a=q:n=1:v=0.4`, SPEC §4). A terminal of another hotty
 version, a 0.3 one included, is no host to it, and the program draws in
 cells. [Upgrading from 0.3](#upgrading-from-03) and
 [from 0.2](#upgrading-from-02) list what callers change.
@@ -17,7 +17,7 @@ It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/main/SDK.md)
 in two layers:
 
 - `require("hotty")` is the **wire layer** (SDK.md §3): it builds commands,
-  decodes what the host sends, cuts HOTTY sequences out of a byte stream,
+  decodes what the host sends, cuts hotty sequences out of a byte stream,
   decides whether the terminal is a host, and names keys and keymaps. It
   does no I/O. It is Lua 5.1
   and the standard library only, so it runs under Neovim's LuaJIT, plain
@@ -303,7 +303,7 @@ session:surface("card", {
 plx owns the terminal and knows whether it is a host, so hotty.plx detects
 nothing and reads nothing itself. plx hands a script the host's
 capabilities (`ctx:hotty().raw`, the msgpack body of the host's reply to
-plx's query, and `on_hotty_caps` when the host changes) and every HOTTY
+plx's query, and `on_hotty_caps` when the host changes) and every hotty
 message for its surfaces (`on_hotty`), and writes
 what it sends (`ctx:hotty_send`) between its frames. Its relay names the
 script's surfaces apart from every other program's, places them where the

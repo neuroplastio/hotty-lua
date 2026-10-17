@@ -5,7 +5,7 @@
 --   plx script register examples/plx/click.lua
 --   plx tool open hotty-click
 --
--- plx knows whether its terminal is a HOTTY host, and its relay places the
+-- plx knows whether its terminal is a hotty host, and its relay places the
 -- surface where the tool is on the screen and moves it with the tool.
 -- hotty.plx sends the document once, places it in the tool's cells, and
 -- hands back what the user did. On a terminal that is not a host, the tool

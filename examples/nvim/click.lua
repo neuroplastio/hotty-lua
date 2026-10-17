@@ -1,10 +1,10 @@
 -- A button below the cursor's line that counts its clicks: the smallest
--- Neovim plugin that shows a surface and hears it. In a HOTTY host
+-- Neovim plugin that shows a surface and hears it. In a hotty host
 -- (hottyterm, say), from this repository:
 --
 --   nvim -c "set rtp+=." -c "luafile examples/nvim/click.lua"
 --
--- The HOTTY in it is three things: a document whose ids are the program's
+-- The hotty in it is three things: a document whose ids are the program's
 -- handles, an event that names one of them, and a delta that changes the
 -- host's copy of the document. hotty.nvim does the rest: it asks the
 -- terminal whether it is a host, places the surface where its line is after

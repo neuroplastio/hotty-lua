@@ -1,4 +1,4 @@
---- hotty speaks HOTTY, HTML Over The TTY (https://github.com/neuroplastio/hotty),
+--- hotty speaks hotty, HTML over the TTY (https://github.com/neuroplastio/hotty),
 --- from Lua: the wire layer of SDK.md §3.
 ---
 --- It does no I/O, starts nothing and reads no clock: the Detector takes the
@@ -31,7 +31,7 @@ M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
 M.VERSION = "0.4" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
-M.SCAN_MAX = 65536 -- the longest HOTTY sequence a Scanner takes
+M.SCAN_MAX = 65536 -- the longest hotty sequence a Scanner takes
 
 -- Event kinds (SPEC §9).
 M.EVENT_CLICK = "click"
@@ -148,7 +148,7 @@ M.scroll_horizontal = M.SCROLL_HORIZONTAL
 local ESC = "\27"
 local ST = "\27\\"
 local HEAD = ESC .. "]" .. M.NUMBER -- ESC ] 7279
-local PREFIX = HEAD .. ";" -- what begins every HOTTY sequence
+local PREFIX = HEAD .. ";" -- what begins every hotty sequence
 
 -- Values and names (SDK.md §3.3, §3.5) -----------------------------------------
 
@@ -1741,7 +1741,7 @@ local Scanner = {}
 Scanner.__index = Scanner
 M.Scanner = Scanner
 
---- A Scanner cuts HOTTY sequences out of a byte stream, however its reads
+--- A Scanner cuts hotty sequences out of a byte stream, however its reads
 --- split it. With opts.da1, it also cuts out answers to Primary Device
 --- Attributes. invalid counts the sequences it dropped.
 function M.scanner(opts)
@@ -1750,7 +1750,7 @@ function M.scanner(opts)
 		invalid = 0,
 		mode = GROUND,
 		held = "", -- a prefix of a segment, in GROUND
-		parts = {}, -- the HOTTY sequence in progress, in OSC
+		parts = {}, -- the hotty sequence in progress, in OSC
 		len = 0, -- its length
 		esc = false, -- the last byte in OSC or DISCARD was ESC
 	}, Scanner)
@@ -1764,7 +1764,7 @@ function Scanner:holding()
 	return self.held
 end
 
---- Whether a HOTTY sequence is in progress, or one too long is being
+--- Whether a hotty sequence is in progress, or one too long is being
 --- dropped: the next feed goes on with it, and flush would drop it.
 --- Otherwise what holding returns is the start of a segment, which a
 --- program reading keys may flush after a moment, as typing.
@@ -1839,7 +1839,7 @@ end
 -- One byte, whatever the mode.
 function Scanner:byte(c, out)
 	if self.mode == DISCARD then
-		-- A HOTTY sequence longer than SCAN_MAX, dropped up to its end.
+		-- A hotty sequence longer than SCAN_MAX, dropped up to its end.
 		if self.esc then
 			self.esc = false
 			self.mode = GROUND
@@ -1890,8 +1890,8 @@ function Scanner:byte(c, out)
 end
 
 --- Takes the next bytes of the stream, and returns segments, in order:
---- {kind = "pass", data = …} for bytes that are not HOTTY's, unchanged;
---- {kind = "osc", data = …} for one complete HOTTY sequence; and with the
+--- {kind = "pass", data = …} for bytes that are not hotty's, unchanged;
+--- {kind = "osc", data = …} for one complete hotty sequence; and with the
 --- da1 option, {kind = "da1", data = …} for a DA1 answer. Adjacent pass
 --- segments are merged.
 function Scanner:feed(data)
@@ -1943,7 +1943,7 @@ function Scanner:feed(data)
 	return out
 end
 
---- Ends the stream: what is held goes out as pass, except a HOTTY sequence
+--- Ends the stream: what is held goes out as pass, except a hotty sequence
 --- in progress, which is dropped as malformed.
 function Scanner:flush()
 	local out = {}
