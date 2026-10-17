@@ -7,7 +7,7 @@
 --     ESC 7 / ESC 8, so it knows where each placement lands, and an erase in
 --     display (ED 2 or 3) drops every placement, as hottyterm does;
 --   - the host (when native): the query, answered in the one version it
---     speaks (version, "0.3") or with EVERSION, and every command, kept as
+--     speaks (version, "0.4") or with EVERSION, and every command, kept as
 --     surfaces and placements, with replies as SPEC §3.6 has them. It lays
 --     nothing out: r=auto gets auto_rows;
 --   - not a host, a multiplexer's pane with no terminal attached: it holds a
@@ -25,7 +25,7 @@ local Host = {}
 Host.__index = Host
 
 local DEFAULT_CAPS = mp.pack({
-	v = "0.3",
+	v = "0.4",
 	cellcss = { w = mp.float(9), h = mp.float(18) },
 	scale = mp.float(1),
 	features = { "hover", "count", "menu" },
@@ -40,7 +40,7 @@ function M.new(opts)
 	opts = opts or {}
 	return setmetatable({
 		native = opts.native ~= false,
-		version = opts.version or "0.3", -- the one version it speaks
+		version = opts.version or "0.4", -- the one version it speaks
 		caps = opts.caps or DEFAULT_CAPS,
 		auto_rows = opts.auto_rows or 4,
 		scanner = hotty.scanner(),

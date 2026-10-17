@@ -581,9 +581,9 @@ test("reveal: where in the value, none for the nearest; features say what a host
 	ops = ops_of(hotty.reveal("x", "s3"))
 	eq(ops[1].v, nil)
 	eq(ops[1].t, "s3")
-	local c = hotty.caps(mp.pack({ v = "0.3" }))
+	local c = hotty.caps(mp.pack({ v = "0.4" }))
 	eq(c:has("hover"), false, "a host that lists no features")
-	c = hotty.caps(mp.pack({ v = "0.3", features = { "hover", "menu" } }))
+	c = hotty.caps(mp.pack({ v = "0.4", features = { "hover", "menu" } }))
 	eq(c:has("hover"), true)
 	eq(c:has("menu"), true)
 	eq(c:has("count"), false)
@@ -726,11 +726,11 @@ test("bodies: a nil, a key that is not a str or a key given twice, in any field"
 		nil,
 		"nil in a field the SDK does not know"
 	)
-	eq(caps(hex("82 a1 76 a3 302e33 a8 6665617475726573 92 a1 61 c0")), nil, "nil at an array's end")
-	eq(caps(hex("82 a1 76 a3 302e33 01 02")), nil, "a key that is not a str where fields are read")
-	eq(caps(hex("82 a1 76 a3 302e33 a8 6665617475726573 81 01 a1 61")), nil, "a map keyed 1 to n for an array")
+	eq(caps(hex("82 a1 76 a3 302e34 a8 6665617475726573 92 a1 61 c0")), nil, "nil at an array's end")
+	eq(caps(hex("82 a1 76 a3 302e34 01 02")), nil, "a key that is not a str where fields are read")
+	eq(caps(hex("82 a1 76 a3 302e34 a8 6665617475726573 81 01 a1 61")), nil, "a map keyed 1 to n for an array")
 	eq(
-		caps(hex("82 a1 76 a3 302e33 a6 667574757265 81 c4 01 78 a1 61")),
+		caps(hex("82 a1 76 a3 302e34 a6 667574757265 81 c4 01 78 a1 61")),
 		nil,
 		"a bin key in a field the SDK does not know"
 	)
@@ -741,7 +741,7 @@ end)
 -- a bin, a timestamp or an extension of another type, which kinds marks,
 -- is no field's type (docs/plx.md).
 test("typed reading: a known field of another kind fails the body", function()
-	local V = "a1 76 a3 302e33 " -- v: "0.3"
+	local V = "a1 76 a3 302e34 " -- v: "0.4"
 	-- A body of v and n - 1 fields more.
 	local function cap(n, h)
 		return caps(hex(string.format("%02x ", 0x80 + n) .. V .. h))
@@ -764,17 +764,17 @@ test("typed reading: a known field of another kind fails the body", function()
 		7,
 		"a1 61 c4 01 78 a1 62 d6 ff 00000001 a1 63 d4 05 00 a1 64 cb 3ff0000000000000 a1 65 90 a1 66 92 c4 00 d4 05 00"
 	)
-	eq(c and c.v, "0.3", "unknown fields of every kind")
+	eq(c and c.v, "0.4", "unknown fields of every kind")
 	eq(c.raw.a, "x")
 	eq(cap(3, "a3 6e6574 81 a1 61 90 a3 6e6574 80"), nil, "a key given twice")
-	eq(caps(hex("de 0001 " .. V)).v, "0.3", "a map 16")
-	eq(caps(hex("df 00000001 " .. V)).v, "0.3", "a map 32")
+	eq(caps(hex("de 0001 " .. V)).v, "0.4", "a map 16")
+	eq(caps(hex("df 00000001 " .. V)).v, "0.4", "a map 32")
 
 	for _, x in ipairs({
-		{ "a1 76 c4 03 302e33", "a bin for a str" },
+		{ "a1 76 c4 03 302e34", "a bin for a str" },
 		{ "a1 76 d6 ff 00000001", "a timestamp for a str" },
 		{ "a1 76 d4 05 00", "an extension for a str" },
-		{ "a1 76 91 a3 302e33", "an array for a str" },
+		{ "a1 76 91 a3 302e34", "an array for a str" },
 	}) do
 		eq(caps(hex("81 " .. x[1])), nil, x[2])
 	end
@@ -815,9 +815,9 @@ test("typed reading: a known field of another kind fails the body", function()
 		eq(cap(2, x[1]), nil, x[2])
 	end
 	ok(cap(2, "a3 6e6574 81 a1 61 90"), "an empty array, in a map")
-	eq(caps(hex("92 a1 76 a3 302e33")), nil, "an array for the body")
-	eq(caps(hex("91 81 a1 76 a3 302e33")), nil, "a map in an array for the body")
-	eq(hotty.caps(hex("92 a1 76 a3 302e33")), nil, "an array for the body, as plx relays it")
+	eq(caps(hex("92 a1 76 a3 302e34")), nil, "an array for the body")
+	eq(caps(hex("91 81 a1 76 a3 302e34")), nil, "a map in an array for the body")
+	eq(hotty.caps(hex("92 a1 76 a3 302e34")), nil, "an array for the body, as plx relays it")
 
 	local function detail(kind, h)
 		return ev(kind, hex(h)).detail
@@ -848,13 +848,13 @@ end)
 
 test("caps: from a body's bytes, as plx relays them", function()
 	local c = hotty.caps(mp.pack({
-		v = "0.3",
+		v = "0.4",
 		scale = mp.float(2),
 		cellcss = { w = mp.float(9), h = mp.float(18) },
 		features = { "count" },
 		future = { 1, "x" },
 	}))
-	eq(c.v, "0.3")
+	eq(c.v, "0.4")
 	eq(c.scale, 2)
 	eq(c.cell_css.w, 9)
 	eq(c.cell_css.h, 18)
@@ -864,11 +864,11 @@ test("caps: from a body's bytes, as plx relays them", function()
 	eq(hotty.caps(""), nil)
 	eq(hotty.caps(nil), nil)
 	eq(hotty.caps("\1"), nil, "not a map")
-	eq(hotty.caps(mp.pack({ v = "0.3", scale = 2 })), nil, "an int for a float")
-	eq(hotty.caps(mp.pack({ v = "0.3", cellcss = { w = 9, h = 18 } })), nil, "ints for a cell's floats")
-	eq(hotty.caps(mp.pack({ v = "0.3" })).cell_css, nil, "none when the host said none")
-	eq(#hotty.caps(mp.pack({ v = "0.3" })).features, 0)
-	eq(hotty.caps(mp.pack({ v = "0.3", features = "menu" })), nil, "a str for an array")
+	eq(hotty.caps(mp.pack({ v = "0.4", scale = 2 })), nil, "an int for a float")
+	eq(hotty.caps(mp.pack({ v = "0.4", cellcss = { w = 9, h = 18 } })), nil, "ints for a cell's floats")
+	eq(hotty.caps(mp.pack({ v = "0.4" })).cell_css, nil, "none when the host said none")
+	eq(#hotty.caps(mp.pack({ v = "0.4" })).features, 0)
+	eq(hotty.caps(mp.pack({ v = "0.4", features = "menu" })), nil, "a str for an array")
 	eq(caps(""), nil, "an ok reply to q with no body")
 end)
 
@@ -1188,8 +1188,8 @@ test("doc's scroll: the axes as given; nil and 0 send no key", function()
 end)
 
 test("query: the SDK's version, and late after it", function()
-	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.3\27\\\27[c")
-	eq(hotty.query(3, { late = true }), "\27]7279;a=q:n=3:v=0.3:late=1\27\\\27[c")
+	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.4\27\\\27[c")
+	eq(hotty.query(3, { late = true }), "\27]7279;a=q:n=3:v=0.4:late=1\27\\\27[c")
 	eq(hotty.withdraw_late(), "\27]7279;a=q:q=2\27\\", "no version")
 	local last = hotty.CODES[#hotty.CODES]
 	eq(last, hotty.EVERSION)
@@ -1246,7 +1246,7 @@ test("menu: a tree, each value in the smallest form; none leaves the program non
 	local m, v = body(hotty.menu({
 		label = "Files",
 		items = {
-			{ key = "Space", label = "Leader", items = { { key = "q", label = "Quit", name = "quit" } } },
+			{ key = "space", label = "Leader", items = { { key = "q", label = "Quit", name = "quit" } } },
 			{ label = "Reload", name = "reload", enabled = false },
 		},
 	}))
@@ -1254,7 +1254,7 @@ test("menu: a tree, each value in the smallest form; none leaves the program non
 	eq(m.control.q, "2")
 	eq(m.control.show, nil)
 	eq(v.label, "Files")
-	eq(v.items[1].key, "Space")
+	eq(v.items[1].key, "space")
 	eq(v.items[1].items[1].name, "quit")
 	eq(v.items[1].items[1].enabled, true, "enabled when nil")
 	eq(v.items[1].enabled, true)
@@ -1271,11 +1271,11 @@ test("menu: a tree, each value in the smallest form; none leaves the program non
 	local m3 = body(hotty.menu(nil))
 	eq(m3.payload, "")
 	-- Show and hide.
-	local m4, s4 = body(hotty.menu_show({ "Space", "f" }))
+	local m4, s4 = body(hotty.menu_show({ "space", "f" }))
 	eq(m4.control.show, "1")
 	eq(m4.control.q, "2")
 	eq(s4.seq[2], "f")
-	eq(m4.payload, "\129\163seq\146\165Space\161f")
+	eq(m4.payload, "\129\163seq\146\165space\161f")
 	eq(body(hotty.menu_show()).payload, "", "no keys, no body: the top level")
 	eq(body(hotty.menu_show({})).payload, "")
 	local m5 = body(hotty.menu_hide())
@@ -1295,7 +1295,7 @@ test("menu_of, menu_show_of, menu_level_of and menu_find: a host reads a menu", 
 		label = "App",
 		items = {
 			{
-				key = "Space",
+				key = "space",
 				label = "Leader",
 				enabled = true,
 				items = {
@@ -1354,9 +1354,9 @@ test("menu_of, menu_show_of, menu_level_of and menu_find: a host reads a menu", 
 	eq(e.detail, "items nest deeper than eight")
 	eq(e.code, "EINVAL")
 	-- A show body.
-	local seq = hotty.menu_show_of(msg(mp.pack({ seq = { "Space", "f" } }), { { "a", "menu" }, { "show", "1" } }))
+	local seq = hotty.menu_show_of(msg(mp.pack({ seq = { "space", "f" } }), { { "a", "menu" }, { "show", "1" } }))
 	eq(#seq, 2)
-	eq(seq[1], "Space")
+	eq(seq[1], "space")
 	eq(#hotty.menu_show_of(msg(nil, { { "a", "menu" }, { "show", "1" } })), 0, "no body: the top level")
 	eq(#hotty.menu_show_of(msg(mp.pack({}), { { "a", "menu" }, { "show", "1" } })), 0, "none in it")
 	local bad_seq, e2 = hotty.menu_show_of(msg(mp.pack({ seq = { 1 } }), { { "a", "menu" }, { "show", "1" } }))
@@ -1365,17 +1365,18 @@ test("menu_of, menu_show_of, menu_level_of and menu_find: a host reads a menu", 
 	eq((hotty.menu_show_of(msg("\1"))), nil)
 	-- The level the keys reach, compared as read_key reads them.
 	eq(#hotty.menu_level_of(tree, nil, {}), 2, "the top level")
-	local level = hotty.menu_level_of(tree, nil, { "Space" })
+	local level = hotty.menu_level_of(tree, nil, { "space" })
 	eq(level[1].key, "f")
-	eq(#hotty.menu_level_of(tree, nil, { "Space", "f" }), 1)
-	eq(hotty.menu_level_of(tree, nil, { "Space", "f", "n" }), nil, "n is no group")
+	eq(#hotty.menu_level_of(tree, nil, { "space", "f" }), 1)
+	eq(hotty.menu_level_of(tree, nil, { "space", "f", "n" }), nil, "n is no group")
 	eq(hotty.menu_level_of(tree, nil, { "q" }), nil)
 	eq(hotty.menu_level_of(tree, nil, { "" }), nil, "a key that does not parse")
 	eq(hotty.menu_level_of(nil, nil, {}), nil)
-	local modded = { items = { { key = "Mod+k", items = { { key = "a", name = "a" } } } } }
-	eq(hotty.menu_level_of(modded, nil, { "Control+k" })[1].name, "a", "Mod is Control")
-	eq(hotty.menu_level_of(modded, { mod = "Meta" }, { "Control+k" }), nil, "and Meta on a Mac")
-	eq(hotty.menu_level_of(modded, { mod = "Meta" }, { "Meta+k" })[1].name, "a")
+	local modded = { items = { { key = "mod+k", items = { { key = "a", name = "a" } } } } }
+	eq(hotty.menu_level_of(modded, nil, { "ctrl+k" })[1].name, "a", "mod is ctrl")
+	eq(hotty.menu_level_of(modded, { mod = "super" }, { "ctrl+k" }), nil, "and super on a Mac")
+	eq(hotty.menu_level_of(modded, { mod = "super" }, { "super+k" })[1].name, "a")
+	eq(hotty.menu_level_of(modded, nil, { "Ctrl+K" })[1].name, "a", "typed keys are read, in any case")
 	-- A pick's item, by name, depth first.
 	eq(hotty.menu_find(tree, "new").key, "n")
 	eq(hotty.menu_find(tree, "quit").label, "Quit")
@@ -1412,10 +1413,12 @@ test("events: mods are bits, 0 when absent; t is absent, not empty, where no ele
 	eq(ev("change", mp.pack({ mods = 1 })):mods(), 0, "another kind carries none")
 	eq(ev("click", ""):mods(), 0)
 	eq(ev("click", mp.pack({ mods = "1" })):mods(), 0, "a str for an int: the detail does not decode")
-	eq(hotty.MOD_SHIFT + hotty.MOD_ALT + hotty.MOD_CONTROL + hotty.MOD_META, 15)
+	eq(hotty.MOD_SHIFT + hotty.MOD_ALT + hotty.MOD_CTRL + hotty.MOD_SUPER, 15)
 	eq(hotty.MOD_ALT, 2)
-	eq(hotty.MOD_CONTROL, 4)
-	eq(hotty.MOD_META, 8)
+	eq(hotty.MOD_CTRL, 4)
+	eq(hotty.MOD_SUPER, 8)
+	eq(hotty.MOD_CONTROL, nil, "renamed")
+	eq(hotty.MOD_META, nil, "renamed")
 	local d = ev("drag", mp.pack({ c = 1, r = 2, mods = 6, tx = 0 })):drag()
 	eq(d.c, 1)
 	eq(d.tx, 0)
@@ -1429,26 +1432,32 @@ test("features: named, and asked with has", function()
 	eq(table.concat(hotty.FEATURES, " "), "passthrough hover count menu")
 	eq(hotty.FEATURE_MENU, "menu")
 	eq(hotty.MENU_DEPTH, 8)
-	eq(hotty.VERSION, "0.3")
+	eq(hotty.VERSION, "0.4")
 	eq(hotty.REVEAL_START, "start")
 	eq(hotty.reveal("x", "t", hotty.REVEAL_NEAREST), hotty.reveal("x", "t"))
 end)
 
 test("keymap: prefix is the program's, and prefix tells which", function()
-	local m = hotty.parse_keymap(nil, "Control+k=prefix g=program Mod+j=prefix")
-	eq(m:program("Control+k"), true)
-	eq(m:prefix("Control+k"), true)
+	local m = hotty.parse_keymap(nil, "ctrl+k=prefix g=program mod+j=prefix")
+	eq(m:program("ctrl+k"), true)
+	eq(m:prefix("ctrl+k"), true)
 	eq(m:program("g"), true)
 	eq(m:prefix("g"), false, "program is not prefix")
-	eq(hotty.parse_keymap(nil, "ArrowDown=prefix"):prefix("Shift+ArrowDown"), true, "the key without Shift")
-	eq(m:prefix("Control+j"), true, "Mod is Control")
-	eq(hotty.parse_keymap({ mod = "Meta" }, "Mod+j=prefix"):prefix("Control+j"), false)
+	eq(hotty.parse_keymap(nil, "arrow_down=prefix"):prefix("shift+arrow_down"), true, "the key without shift")
+	eq(hotty.parse_keymap(nil, "g=prefix"):prefix("shift+g"), false, "but not for a character")
+	eq(m:prefix("ctrl+j"), true, "mod is ctrl")
+	eq(hotty.parse_keymap({ mod = "super" }, "mod+j=prefix"):prefix("ctrl+j"), false)
 	eq(m:prefix(""), false)
-	local f = hotty.resolve(nil, false, "ArrowLeft=prefix")
-	eq(f:lookup("ArrowLeft"), nil, "not the field's")
-	eq(hotty.read_key(nil, "Mod+a"), "Control+a")
-	eq(hotty.read_key({ mod = "Meta" }, "Mod+a"), "Meta+a")
-	eq(hotty.read_key(nil, "Control+"), nil)
+	eq(m:prefix("mod+j"), false, "no pressed key has mod")
+	local f = hotty.resolve(nil, false, "arrow_left=prefix")
+	eq(f:lookup("arrow_left"), nil, "not the field's")
+	eq(hotty.read_key(nil, "Mod+a"), "ctrl+a")
+	eq(hotty.read_key({ mod = "super" }, "Mod+a"), "super+a")
+	eq(hotty.read_key({ mod = "super" }, "mod+super+a"), nil, "mod with super")
+	eq(hotty.read_key({ mod = "ctrl" }, "mod+ctrl+a"), nil, "and with ctrl")
+	eq(hotty.read_key(nil, "ctrl+"), nil)
+	eq(hotty.parse_key("mod+a"), nil, "parse_key refuses mod")
+	eq(hotty.read_key({ mod = "Meta" }, "mod+a"), "ctrl+a", "a mod that is neither is ctrl")
 end)
 
 test("sync takes commands as arguments or a list", function()
@@ -1643,7 +1652,7 @@ test("detector: a reply to the query is a host only in the SDK's version", funct
 	end
 	for _, r in ipairs({
 		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.2" })),
-		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.2,0.3" })),
+		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.3,0.4" })),
 		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "" })),
 		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }),
 		reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }),
@@ -1661,9 +1670,9 @@ test("detector: a reply to the query is a host only in the SDK's version", funct
 	local d = hotty.detector({ late = true })
 	d:start(0)
 	d:reply(reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }), 10)
-	eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.3" })), 20), true)
+	eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.4" })), 20), true)
 	eq(d.state, hotty.NATIVE, "with late, a host after the error")
-	eq(d.caps.v, "0.3")
+	eq(d.caps.v, "0.4")
 end)
 
 -- keys, field -------------------------------------------------------------------
@@ -1683,21 +1692,49 @@ test("decode_keys: a byte that is not UTF-8 is no key", function()
 	eq(keys[2], "b")
 end)
 
-test("parse_key: Shift makes a capital beyond ASCII", function()
-	eq(hotty.parse_key("Shift+\195\169"), "\195\137") -- é, É
-	eq(hotty.parse_key("Control+Shift+\208\182"), "Control+\208\150") -- ж, Ж
+test("parse_key: a letter is written small, whatever its script; key_text gives its capital with shift", function()
+	eq(hotty.parse_key("Shift+\195\137"), "shift+\195\169") -- É, é
+	eq(hotty.parse_key("Control+\208\150"), "ctrl+\208\182") -- Ж, ж
+	eq(hotty.parse_key("\206\163"), "\207\131") -- Σ, σ
+	eq(hotty.parse_key("\199\133"), "\199\134") -- ǅ, ǆ
+	eq(hotty.parse_key("\201\155"), "\201\155", "a letter the table has no case for is itself")
+	eq(hotty.key_text("shift+\195\169"), "\195\137") -- é, É
+	eq(hotty.key_text("shift+\208\182"), "\208\150") -- ж, Ж
+	eq(hotty.key_text("shift+\199\134"), "\199\132") -- ǆ, Ǆ
+	eq(hotty.key_text("shift+\207\130"), "\206\163") -- ς, Σ
+	eq(hotty.key_text("shift+1"), "1")
+	eq(hotty.key_text("ctrl+a"), nil)
+	eq(hotty.key_text("mod+a"), nil, "no key has mod")
+end)
+
+test("decode_keys: a capital, a Latin-1 or a Cyrillic one, is shift and its letter", function()
+	local keys = hotty.decode_keys("A\195\137\208\150\207\130")
+	eq(keys[1], "shift+a")
+	eq(keys[2], "shift+\195\169")
+	eq(keys[3], "shift+\208\182")
+	eq(keys[4], "\207\130", "a small letter is itself")
+end)
+
+test("keymap: binds, with the fallback without shift for a key that is not a character", function()
+	local m = hotty.parse_keymap(nil, "arrow_left=program ctrl+w=line-start")
+	eq(m:binds("arrow_left"), true)
+	eq(m:binds("shift+arrow_left"), true)
+	eq(m:binds("ctrl+key_w"), false, "a physical key and a character are two keys")
+	eq(m:binds("ctrl+w"), true)
+	eq(m:binds("shift+w"), false)
+	eq(m:binds(""), false)
 end)
 
 test("keymap: VT does not separate bindings", function()
 	eq(
-		hotty.parse_keymap(nil, "Control+a=line-start\vAlt+b=word-backward Alt+f=word-forward"):format(),
-		"Alt+f=word-forward"
+		hotty.parse_keymap(nil, "ctrl+a=line-start\valt+b=word-backward alt+f=word-forward"):format(),
+		"alt+f=word-forward"
 	)
 end)
 
 test("decode_keys: a modifier field below 2 is no modifier", function()
 	local keys = hotty.decode_keys("\27[3;0~\27[97;0u")
-	eq(keys[1], "Delete")
+	eq(keys[1], "delete")
 	eq(keys[2], "a")
 end)
 
@@ -1706,12 +1743,13 @@ test("keymap: TERMINAL_KEYS reads back as itself", function()
 end)
 
 test("keymap: program in a field's keymap, and with a key that does not parse", function()
-	local f = hotty.resolve(nil, false, "ArrowLeft=program")
-	eq(f:program("ArrowLeft"), true)
-	eq(f:lookup("ArrowLeft"), nil, "lookup says as much")
-	eq(f:program("ArrowRight"), false)
+	local f = hotty.resolve(nil, false, "arrow_left=program")
+	eq(f:program("arrow_left"), true)
+	eq(f:lookup("arrow_left"), nil, "lookup says as much")
+	eq(f:program("arrow_right"), false)
 	eq(f:program(""), false)
-	eq(f:program("Hyper+a"), false)
+	eq(f:program("hyper+a"), false)
+	eq(f:program("meta+a"), false)
 end)
 
 test("field: do is do_action", function()
@@ -1726,9 +1764,9 @@ end)
 test("keymap: selects with a key that does not parse, or a character", function()
 	local m = hotty.resolve(nil, true)
 	eq(m:selects(""), false)
-	eq(m:selects("Hyper+ArrowLeft"), false)
-	eq(m:selects("Shift+a"), false, "A types")
-	eq(m:selects("Shift+ArrowLeft"), true)
+	eq(m:selects("hyper+arrow_left"), false)
+	eq(m:selects("shift+a"), false, "A types")
+	eq(m:selects("shift+arrow_left"), true)
 end)
 
 test("field: selection, from opts and from select", function()
@@ -1765,8 +1803,8 @@ end)
 
 test("caps: merge folds any field a caps event changed, and drops one it empties (SPEC §9)", function()
 	local c = hotty.caps(mp.pack({
-		mod = "Control",
-		edit = { copy = mp.array({ "Control+c" }) },
+		mod = "ctrl",
+		edit = { copy = mp.array({ "ctrl+c" }) },
 		features = { "hover", "menu" },
 		cellcss = { w = mp.float(9), h = mp.float(18) },
 		limits = { surfaces = 64 },
@@ -1777,17 +1815,17 @@ test("caps: merge folds any field a caps event changed, and drops one it empties
 	eq(m.raw.features, nil, "features")
 	eq(m.raw.host, nil, "an empty str")
 	eq(m.raw.limits, nil, "limits")
-	eq(m.raw.mod, "Control", "mod")
+	eq(m.raw.mod, "ctrl", "mod")
 	eq(#m.features, 0, "Caps.features")
 	eq(m:has("hover"), false)
 	eq(m.host, nil)
 	eq(m.cell_css.h, 18, "what the event leaves out stays")
-	eq(c:merge(hotty.caps(mp.pack({ mod = "Meta" }))).raw.edit ~= nil, true, "edit kept")
+	eq(c:merge(hotty.caps(mp.pack({ mod = "super" }))).raw.edit ~= nil, true, "edit kept")
 	local n = c:merge(hotty.caps(mp.pack({ cellcss = { w = mp.float(10), h = mp.float(20) }, features = { "count" } })))
 	eq(n.cell_css.w, 10, "cellcss")
 	eq(n:has("count"), true, "features")
 	eq(n:has("menu"), false, "features are replaced, not added to")
-	eq(n.mod, "Control")
+	eq(n.mod, "ctrl")
 	eq(c.cell_css.w, 9, "the original is not changed")
 end)
 

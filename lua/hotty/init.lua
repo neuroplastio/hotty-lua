@@ -29,7 +29,7 @@ M.NUMBER = "7279" -- the OSC number
 M.CHUNK = 4096 -- the most base64 bytes in one sequence
 M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
-M.VERSION = "0.3" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
+M.VERSION = "0.4" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
 M.SCAN_MAX = 65536 -- the longest HOTTY sequence a Scanner takes
 
@@ -119,8 +119,8 @@ M.FEATURES = { "passthrough", "hover", "count", "menu" }
 -- Event:mods (SPEC §9).
 M.MOD_SHIFT = 1
 M.MOD_ALT = 2
-M.MOD_CONTROL = 4
-M.MOD_META = 8
+M.MOD_CTRL = 4
+M.MOD_SUPER = 8
 
 -- Where a reveal brings an element (SPEC §6.1).
 M.REVEAL_NEAREST = "" -- as little as brings it into view
@@ -1066,8 +1066,8 @@ function Event:fields()
 	return out
 end
 
---- The modifier keys held, as the bits MOD_SHIFT, MOD_ALT, MOD_CONTROL and
---- MOD_META: in a click, a press and a drag's events (SPEC §9). 0 when none
+--- The modifier keys held, as the bits MOD_SHIFT, MOD_ALT, MOD_CTRL and
+--- MOD_SUPER: in a click, a press and a drag's events (SPEC §9). 0 when none
 --- is, and for any other kind.
 function Event:mods()
 	local k = self.kind
@@ -1437,8 +1437,8 @@ end
 --- The level of tree that the keys seq reach (SPEC §10.7): its items, a
 --- group's, for a host to show those that have a key. From the top level,
 --- each key of seq enters the first group (an item with items) at the level
---- whose key is that key, compared as read_key compares: with Mod read as
---- platform ({mod, edit}, or nil for Control) reads it. With no keys it is
+--- whose key is that key, compared as read_key compares: with mod read as
+--- platform ({mod, edit}, or nil for ctrl) reads it. With no keys it is
 --- the top level. nil when the keys reach no group, or tree is nil.
 function M.menu_level_of(tree, platform, seq)
 	if not tree then
@@ -2023,6 +2023,7 @@ M.MOVES = keys.MOVES
 M.INSERT = keys.INSERT
 M.TERMINAL_KEYS = keys.TERMINAL_KEYS
 M.parse_key = keys.parse_key
+M.key_text = keys.key_text
 M.decode_keys = keys.decode_keys
 M.keymap = keys.keymap
 M.parse_keymap = keys.parse_keymap

@@ -668,6 +668,14 @@ local function run_keys(v)
 		end
 		return same, show(got) .. ", want " .. show(v.keys)
 	end
+	if v.text ~= nil then
+		local got = hotty.key_text(v.key)
+		return equal(got, v.text), show(got) .. ", want " .. show(v.text)
+	end
+	if v.mod ~= nil then
+		local got = hotty.read_key({ mod = v.mod }, v.key)
+		return equal(got, v.canon), show(got) .. ", want " .. show(v.canon)
+	end
 	local got = hotty.parse_key(v.key)
 	return equal(got, v.canon), show(got) .. ", want " .. show(v.canon)
 end
@@ -718,6 +726,12 @@ local function run_keymap(v)
 		local got = m:selects(key)
 		if got ~= want then
 			return false, show(key) .. ": selects " .. show(got) .. ", want " .. show(want)
+		end
+	end
+	for key, want in pairs(v.binds or {}) do
+		local got = m:binds(key)
+		if got ~= want then
+			return false, show(key) .. ": binds " .. show(got) .. ", want " .. show(want)
 		end
 	end
 	return true

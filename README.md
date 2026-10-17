@@ -5,11 +5,13 @@ HTML Over The TTY. With it, a Lua program shows small HTML documents, called
 surfaces, on rectangles of cells, and hears what the user does in them. It
 is written for two places: Neovim plugins, and plx scripts.
 
-It speaks HOTTY 0.3: a host's replies and events carry msgpack bodies
-(SPEC §3.3), a delta is one list of ops (SPEC §6.1), and its query lists the
-version it speaks (`a=q:n=1:v=0.3`, SPEC §4). A terminal of another HOTTY
-version, a 0.2 one included, is no host to it, and the program draws in
-cells. [Upgrading from 0.2](#upgrading-from-02) lists what callers change.
+It speaks HOTTY 0.4: a host's replies and events carry msgpack bodies
+(SPEC §3.3), a delta is one list of ops (SPEC §6.1), keys are named as
+myelin key names 0.1 names them (SPEC §10.4), and its query lists the
+version it speaks (`a=q:n=1:v=0.4`, SPEC §4). A terminal of another HOTTY
+version, a 0.3 one included, is no host to it, and the program draws in
+cells. [Upgrading from 0.3](#upgrading-from-03) and
+[from 0.2](#upgrading-from-02) list what callers change.
 
 It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/main/SDK.md)
 in two layers:
@@ -52,7 +54,7 @@ an error.
 
 | SDK.md | hotty |
 | --- | --- |
-| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `MOD_SHIFT` …, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
+| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `MOD_SHIFT`, `MOD_ALT`, `MOD_CTRL`, `MOD_SUPER`, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
 | commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `sync` |
@@ -64,7 +66,7 @@ an error.
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
-| keys (§3.10) | `parse_key(name)`, `decode_keys(input)`, `parse_keymap(platform, value)`, `resolve(platform, multiline, value…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:prefix(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
+| keys (§3.10) | `parse_key(name)`, `read_key(platform, name)`, `decode_keys(input)`, `key_text(key)`, `parse_keymap(platform, value)`, `resolve(platform, multiline, value…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:binds(key)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:prefix(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
 | messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`, `reply.op`; `event:value()`, `:checked()`, `:fields()`, `:mods()`, `:link()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.cell_css`, `caps.features` and the other fields; `caps:has(feature)`, `:light()` |
 
 Where Lua differs:
@@ -98,8 +100,15 @@ Where Lua differs:
 - **Characters are code points,** CR LF one: Lua has no grapheme
   segmentation, so `decode_keys` and the Field split `e` and a combining
   accent in two, and the runner skips the vectors that require
-  `graphemes` (SDK.md §4.6). `parse_key` makes a capital of a letter with
-  Shift in ASCII, Latin-1 and the basic Greek and Cyrillic alphabets.
+  `graphemes` (SDK.md §4.6). Letters are written small, and
+  `key_text` and `decode_keys` capitalise them, by the simple case mappings
+  of ASCII, Latin-1, Latin Extended, Greek, Cyrillic, Armenian and the
+  full-width Latin letters, from a table in `hotty.keys`: the runtimes'
+  `string.lower` differs beyond ASCII.
+- **A platform** is a table, `{ mod = "ctrl" | "super", edit = … }`, with
+  `nil` for the zero Platform (`ctrl`, the default edit shortcuts);
+  `platform_of(caps)` makes one. `parse_key` refuses `mod`; `read_key`
+  reads it.
 - **zlib.** Lua has none. `encode` compresses only when given a compressor
   (`opts.compress`, from bytes to zlib bytes; SDK.md §3.3 has it run at
   zlib's default level, 6), and a host never compresses what it sends (SPEC
@@ -120,6 +129,31 @@ Where Lua differs:
   SDK: `7.0` in an int field, `2` in a float one, or `[]` in a map one,
   and the body does not decode. An int further than 2^53 − 1 from 0 does
   not decode either. [`docs/plx.md`](docs/plx.md) has the contract.
+
+## Upgrading from 0.3
+
+What a caller changes (SDK.md Appendix D). A program, its `data-keys` and
+menus, and its tests' fake hosts move together:
+
+- **Every key's name changes** to myelin key names 0.1: `Control+a` is
+  `ctrl+a`, `Meta` is `super`, `ArrowLeft` is `arrow_left`, `Enter` is
+  `enter`, `Space` is `space`. `hotty.MODIFIERS` is `super ctrl alt shift`.
+- **`mod`, not `Mod`.** A binding writes `mod+s`; `mod` with `ctrl` or
+  `super` is refused. A host's `mod` is `"ctrl"` or `"super"`, and its
+  `edit` names keys the new way. `parse_key` refuses `mod`; a binding read
+  on a platform goes through `read_key(platform, name)`, and the keymap
+  functions do it themselves.
+- **A capital is no Shift.** `G` reads as `g`, so Shift with a letter is
+  `shift+g`. `key_text(key)` is what a key types: `shift+a` types `A`. A
+  field types `hotty.key_text(key)`, not the key.
+- **Shift falls back only from a key that is not a character.** An unbound
+  `shift+arrow_left` is looked up as `arrow_left`; `shift+g` is a key of its
+  own. `keymap:binds(key)` says whether a keymap binds a key, with that
+  fallback, for a host that names a press twice, by its place and by what
+  it types (`ctrl+key_w`, `ctrl+w`).
+- **`MOD_CONTROL` and `MOD_META`** are `MOD_CTRL` and `MOD_SUPER`, with the
+  same bits.
+- **The version is `"0.4"`** alone: a 0.3 host is no host.
 
 ## Upgrading from 0.2
 
@@ -171,9 +205,9 @@ local f = hotty.field({ value = "foo bar" }) -- opts: value, caret, anchor, mult
 for _, key in ipairs(hotty.decode_keys(input)) do
 	local action = key and km:lookup(key)
 	if action == hotty.INSERT then
-		f:type(key == "Space" and " " or key) -- in place of the selection
+		f:type(hotty.key_text(key)) -- in place of the selection
 	elseif action and km:selects(key) then
-		f:extend(action) -- Shift+ArrowLeft, Control+Shift+End: the caret moves, the anchor stays
+		f:extend(action) -- shift+arrow_left, ctrl+shift+end: the caret moves, the anchor stays
 	elseif action and action ~= "submit" then
 		f:do_action(action) -- true when the value changed
 	end

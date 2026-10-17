@@ -189,7 +189,7 @@ test("a host: detected native, with its capabilities", function(spawn)
 		return t.lua("return T.mode") == "native"
 	end, "native")
 	eq(t.lua("return T.host"), "fake")
-	eq(t.lua("return T.term.caps.v"), "0.3")
+	eq(t.lua("return T.term.caps.v"), "0.4")
 	eq(t.host.queries, 1)
 	eq(t.host.problems, {})
 	return t
@@ -229,7 +229,7 @@ test(
 		wait(function()
 			return t.host.placements["t-card"] ~= nil
 		end, "the card's placement")
-		eq(t.lua("return T.term.caps.v"), "0.3")
+		eq(t.lua("return T.term.caps.v"), "0.4")
 		eq(t.host.queries, 1)
 		eq(t.host.problems, {})
 		return t
