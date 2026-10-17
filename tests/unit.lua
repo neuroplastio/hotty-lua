@@ -1286,6 +1286,58 @@ test("menu: a tree, each value in the smallest form; none leaves the program non
 	eq(m6.payload:sub(1, 9), "\130\165label\217\32")
 end)
 
+test("touch: each area a map of c, r, w, h and drag, in that order; none leaves none (SPEC §9.6)", function()
+	local function body(cmd)
+		local _, m = hotty.decoder():feed(cmd)
+		return m, m.payload ~= "" and msgpack.decode(m.payload) or nil
+	end
+	local m, v =
+		body(hotty.touch({ { c = 2, r = 3, w = 10, h = 1, drag = "x" }, { c = 0, r = 5, w = 1, h = 4, drag = "y" } }))
+	eq(m.control.a, "touch")
+	eq(m.control.q, "2")
+	eq(#v.areas, 2)
+	eq(v.areas[2].drag, "y")
+	eq(
+		m.payload:sub(1, 26),
+		"\129\165areas\146\133\161c\2\161r\3\161w\10\161h\1\164drag",
+		"the first area, its keys in order"
+	)
+	eq(body(hotty.touch()).payload, "", "no areas, no payload")
+	eq(body(hotty.touch({})).payload, "")
+	eq(body(hotty.touch(nil, { n = 4 })).control.n, "4")
+	eq(hotty.TOUCH_MAX, 256)
+	-- Each int in the smallest form it fits, and read back as it was: the
+	-- bytes it takes, where {"areas": [{"c": takes 11 before it, and "r", "w",
+	-- "h" and "drag", each with its value, 16 after it.
+	for _, t in ipairs({
+		{ 0, 1 },
+		{ 127, 1 },
+		{ 128, 2 },
+		{ 255, 2 },
+		{ 256, 3 },
+		{ 65535, 3 },
+		{ 65536, 5 },
+		{ 2 ^ 32 - 1, 5 },
+		{ 2 ^ 32, 9 },
+		{ 2 ^ 53 - 1, 9 },
+		{ -1, 1 },
+		{ -32, 1 },
+		{ -33, 2 },
+		{ -128, 2 },
+		{ -129, 3 },
+		{ -32768, 3 },
+		{ -32769, 5 },
+		{ -2 ^ 31, 5 },
+		{ -2 ^ 31 - 1, 9 },
+		{ -(2 ^ 53 - 1), 9 },
+	}) do
+		local n, size = t[1], t[2]
+		local cmd, b = body(hotty.touch({ { c = n, r = 0, w = 1, h = 1, drag = "x" } }))
+		eq(b.areas[1].c, n, "c " .. string.format("%.0f", n))
+		eq(#cmd.payload - 11 - 16, size, "c " .. string.format("%.0f", n) .. " takes " .. size)
+	end
+end)
+
 test("menu_of, menu_show_of, menu_level_of and menu_find: a host reads a menu", function()
 	local function msg(body, ctl)
 		local _, m = hotty.decoder():feed(hotty.encode(ctl or { { "a", "menu" } }, body))

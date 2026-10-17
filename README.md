@@ -57,7 +57,7 @@ an error.
 | constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `MOD_SHIFT`, `MOD_ALT`, `MOD_CTRL`, `MOD_SUPER`, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
-| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `sync` |
+| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `touch`, `sync` |
 | ops (§3.4.3) | `morph`, `inner`, `replace`, `append`, `prepend`, `before`, `after`, `remove`, `attr`, `unattr`, `text`, `var`, `reveal_op`: each returns an op, a table with `op`, `target`, `key` and `value`; `delta(surface, ops, opts)` sends a list of them as one delta |
 | reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL`. `q` goes out only where the wire does not imply it |
 | Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover` (`true` is on, `false` is off, `nil` sends nothing: they belong to the surface), `keep_cursor` |
@@ -92,6 +92,10 @@ Where Lua differs:
   items } } }`; `enabled` is true when `nil`. `menu_of` reads one the same
   way, with `""` for what the body leaves out and `enabled` false where it is
   absent.
+- **Touch areas** are tables, `{ c, r, w, h, drag }`: the screen's cells
+  where a finger drags as the mouse (SPEC §9.6), counted from 0, and
+  `"x"`, `"y"` or `"xy"`. `touch(areas)` names them for the screen it is
+  sent on, and `touch()` leaves none.
 - **The scroll axes** are also `scroll_vertical` and `scroll_horizontal`,
   as SDK.md's Appendix A spells them for Lua; every other constant here is
   in upper case.
@@ -117,9 +121,9 @@ Where Lua differs:
   It stops at the decoder's `max` (`opts.max`, 16 MiB by default), as it
   stops joining the chunks of a message that would decode past it.
 - **msgpack.** Lua has none either. A host's bodies are msgpack (SPEC
-  §3.3): `hotty.msgpack.decode` reads them, in Lua. A delta's ops and a menu
-  are written by `delta` and `menu`, each str, array and map in the
-  smallest form of its header. `msg:body()` is the
+  §3.3): `hotty.msgpack.decode` reads them, in Lua. A delta's ops, a menu
+  and touch areas are written by `delta`, `menu` and `touch`, each str,
+  int, array and map in the smallest form of its header. `msg:body()` is the
   body it decoded, a map, as a table with no metatable, and its kinds.
 - **Numbers are doubles** in Lua 5.1, LuaJIT and gopher-lua, so `7` and
   `7.0` are one number, and a table is a map or an array. So

@@ -247,6 +247,8 @@ local function build(b)
 		return hotty.menu_show(a.keys, opts)
 	elseif name == "menu_hide" then
 		return hotty.menu_hide(opts)
+	elseif name == "touch" then
+		return hotty.touch(a.areas, opts)
 	elseif name == "sync" then
 		local cmds = {}
 		for i, c in ipairs(a.commands) do

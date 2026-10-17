@@ -130,6 +130,9 @@ M.REVEAL_END = "end" -- its bottom at the bottom
 -- How deep a menu's items nest, the top level's being one deep (SPEC §10.7).
 M.MENU_DEPTH = 8
 
+-- How many areas an a=touch may name (SPEC §9.6); a host refuses more.
+M.TOUCH_MAX = 256
+
 -- Quiet levels (SPEC §3.5).
 M.REPLY_ALWAYS = 0
 M.REPLY_ON_ERROR = 1
@@ -430,8 +433,8 @@ function M.hide(surface, opts)
 	return command({ { "a", "hide" }, { "s", surface } }, nil, M.NO_REPLY, opts)
 end
 
--- msgpack for a program's bodies, a delta's ops and a menu: each str, array
--- and map header in the smallest form it fits (SPEC §3.3).
+-- msgpack for a program's bodies, a delta's ops, a menu and touch areas: each
+-- str, int, array and map header in the smallest form it fits (SPEC §3.3).
 local function mp_head(n, fix, fixmax, h8, h16, h32)
 	if n <= fixmax then
 		return char(fix + n)
@@ -453,6 +456,44 @@ end
 
 local function mp_map(n)
 	return mp_head(n, 0x80, 15, nil, 0xde, 0xdf)
+end
+
+-- n, at least 0, big-endian in size bytes: in arithmetic, since gopher-lua
+-- has no bit library.
+local function mp_be(n, size)
+	local out = {}
+	for i = size, 1, -1 do
+		out[i] = char(n % 256)
+		n = floor(n / 256)
+	end
+	return concat(out)
+end
+
+-- An int, a whole number within 2^53 of 0 (a fraction is dropped).
+local function mp_int(n)
+	n = floor(n)
+	if n >= 0 then
+		if n < 128 then
+			return char(n)
+		elseif n < 256 then
+			return "\204" .. char(n)
+		elseif n < 65536 then
+			return "\205" .. mp_be(n, 2)
+		elseif n < 4294967296 then
+			return "\206" .. mp_be(n, 4)
+		end
+		return "\207" .. mp_be(n, 8)
+	elseif n >= -32 then
+		return char(256 + n)
+	elseif n >= -128 then
+		return "\208" .. char(256 + n)
+	elseif n >= -32768 then
+		return "\209" .. mp_be(65536 + n, 2)
+	elseif n >= -2147483648 then
+		return "\210" .. mp_be(4294967296 + n, 4)
+	end
+	local hi = floor(n / 4294967296)
+	return "\211" .. mp_be(4294967296 + hi, 4) .. mp_be(n - hi * 4294967296, 4)
 end
 
 -- Ops (SDK.md §3.4.3) ------------------------------------------------------------
@@ -718,6 +759,41 @@ end
 --- 2).
 function M.menu_hide(opts)
 	return command({ { "a", "menu" }, { "show", "0" } }, nil, M.NO_REPLY, opts)
+end
+
+--- Names the cells where a finger drags as the mouse does (SPEC §9.6), so
+--- that what the program drags with the mouse in its cells, a slider, a
+--- finger drags too. areas is a list of { c, r, w, h, drag }: the first
+--- column and row each covers, counted from 0 at the screen's top left (a
+--- mouse report counts from 1), the columns and rows it spans, at least 1
+--- each, and the way a finger drags in it, "x" across, "y" up and down, or
+--- "xy" either. While the program has the terminal report the mouse's
+--- buttons, a touch that begins in an area and first moves the way it drags
+--- is the primary button: pressed where it began, moved with the finger,
+--- released where it lifts; a tap presses and releases.
+---
+--- The areas last until the program sends others; with none (nil or {}) it
+--- leaves none, and the command has no payload. They are cells of the screen
+--- it is sent on: the main and the alternate screen keep their own, leaving
+--- the alternate screen drops its, and a full reset drops both. So the
+--- program sends them again when what it drew moves, the size changes or it
+--- switches screens, and touch() when it ends. Keep to TOUCH_MAX areas. Each
+--- goes out as a map of c, r, w, h and drag, in that order. opts: n, q
+--- (default 2).
+function M.touch(areas, opts)
+	if areas == nil or #areas == 0 then
+		return command({ { "a", "touch" } }, nil, M.NO_REPLY, opts)
+	end
+	local out = { mp_map(1) .. mp_str("areas") .. mp_array(#areas) }
+	for i, a in ipairs(areas) do
+		out[i + 1] = mp_map(5)
+			.. (mp_str("c") .. mp_int(a.c))
+			.. (mp_str("r") .. mp_int(a.r))
+			.. (mp_str("w") .. mp_int(a.w))
+			.. (mp_str("h") .. mp_int(a.h))
+			.. (mp_str("drag") .. mp_str(a.drag))
+	end
+	return command({ { "a", "touch" } }, join(out, #out), M.NO_REPLY, opts)
 end
 
 --- Commands already built, bracketed in synchronized output, so the host
