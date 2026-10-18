@@ -28,7 +28,9 @@ in two layers:
   every redraw.
 - `require("hotty.plx")` is the **SDK layer** for plx scripts (SDK.md
   §4.2): surfaces at the cells of the script's tool or rail, which plx's
-  relay moves with it.
+  relay moves with it. plx documents it, with the limits of gopher-lua
+  that shape this code: plexos'
+  [`docs/PLX-SCRIPT.md`](https://github.com/neuroplastio/plexos/blob/main/docs/PLX-SCRIPT.md#hotty-from-lua-hottyplx).
 
 ```lua
 local hotty = require("hotty")
@@ -298,82 +300,6 @@ session:surface("card", {
 - **Closing.** `session:close()` deletes the surfaces, `session:detach_all()`
   leaves them on the screen, detached. Sessions close on `VimLeavePre`.
 
-## plx
-
-plx owns the terminal and knows whether it is a host, so hotty.plx detects
-nothing and reads nothing itself. plx hands a script the host's
-capabilities (`ctx:hotty().raw`, the msgpack body of the host's reply to
-plx's query, and `on_hotty_caps` when the host changes) and every hotty
-message for its surfaces (`on_hotty`), and writes
-what it sends (`ctx:hotty_send`) between its frames. Its relay names the
-script's surfaces apart from every other program's, places them where the
-tool or rail is on the screen, moves and clips them with it, and hides them
-under whatever plx draws over it.
-
-```lua
-local hotty, hplx = require("hotty"), require("hotty.plx")
-
-local t = plx.tool({ id = "mytool", edge = "right", size = 32 })
-local session = hplx.session(t) -- takes t.on_hotty, on_hotty_caps, on_resize
-
-function t.init(ctx)
-	session:attach(ctx) -- the host plx knows: "native", or "text"
-	session:surface("card", {
-		html = "<button id=go>Go</button> <span id=out></span>",
-		x = 0, -- the tool's own cells, from its top left
-		y = 0,
-		cols = 30,
-		rows = 2,
-		on_event = function(ev, surface)
-			if ev.kind == hotty.EVENT_CLICK and ev.target == "go" then
-				surface:set_text("out", "gone")
-			end
-		end,
-	})
-end
-
-function t.render(ctx)
-	-- Cells under the surface on a host; the same thing in cells elsewhere.
-	return session:native() and ui.box({ h = 2 }) or ui.text("[ Go ]")
-end
-```
-
-[`examples/plx/click.lua`](examples/plx/click.lua) is a whole tool.
-
-- **A session** (`hplx.session(tool, opts)`) holds a script's surfaces.
-  Given the tool, it sets its `on_hotty`, `on_hotty_caps` and `on_resize`,
-  calling any the tool had; a script that sets its own afterwards calls
-  `session:hotty(ctx, seq)`, `:hotty_caps(ctx, raw)` and `:resize(ctx)`
-  from it. `session:attach(ctx)` in `init` reads the host: plx calls
-  `on_hotty_caps` only when it changes. A host whose capabilities do not
-  decode, or name another version than `VERSION`, is text (SPEC §4).
-- **Layout.** A surface is at `x`, `y` in the tool's cells. The session
-  sends the document once and places it, clipped to the tool with a
-  placement window, and then only what changed: a placement when it moved,
-  `hide` (with `keep`) or `del` when it went out of view (`shown = false`,
-  or past the tool's cells). Each change is laid out at once.
-- **A new host** has none of the surfaces: every document goes again, and
-  `on_ready(mode, caps)` runs. So does an `ENOENT`. A `caps` event the
-  instance is sent folds into `session.caps`, and `on_caps(caps, changed)`
-  runs.
-- **Flags.** A surface's `press`, `fit` and `hover` are sent with the
-  placement when they change, not with every one (SPEC §5.2); a surface the
-  host lost starts from none.
-- **Rows auto** (`rows = nil`): the first placement is numbered, and the
-  rows the host chose are kept. plx answers it once the tool is on the
-  screen, so the rows may come after the request's 3 s on `plx.after`;
-  they are kept then too. `fit = true` keeps them current.
-- **A name a `ui.hotty` uses** is not the session's to take; `prefix`
-  keeps them apart.
-- **Closing.** `session:close()` deletes the surfaces. plx's relay takes no
-  `detach`, so there is no `detach_all`.
-
-plx-script has a pinned copy of `lua/hotty/` built in, all but `nvim.lua`.
-`hotty.base64`, `hotty.inflate` and `hotty.msgpack` are seams: a host may
-preload native modules with the same functions, and plx does for base64.
-[`docs/plx.md`](docs/plx.md) has their contract, and the primitives
-hotty.plx is built on, as agreed with plexos.
-
 ## Conformance
 
 `make check` is the gate. It runs, under luajit, lua5.1, `nvim -l` and glua
@@ -405,26 +331,6 @@ presses Ctrl-L, scrolls and splits, and leaves a screenshot of each in
 The vectors are a copy of the spec's (`tests/vectors.json`). With a checkout
 of neuroplastio/hotty at `HOTTY_DIR` (`../../hotty/main` by default), the
 runner fails when the copy differs; `make vectors` updates it.
-
-## gopher-lua
-
-plx runs scripts in gopher-lua v1.1.2. Its limits shape this code, and any
-plx script:
-
-- **`table.concat` overflows** its fixed-size registry at a few thousand
-  strings, so the SDK joins in batches (`hotty.join`).
-- **Its pattern matcher gives up** on a repetition over long input
-  ("pattern/input too complex"), so nothing matches a pattern with `*` over
-  a payload.
-- **Once `pcall` catches an error, a closure no longer shares its caller's
-  locals**: the caller's open upvalues are closed with the error. The SDK
-  keeps what it changes in tables.
-- **A multiple assignment assigns as it goes**: in `a, b = a + 1, a`, `b`
-  gets the new `a`. The SDK assigns apart where a value reads a name
-  assigned before it.
-- **`math.huge` is the largest double**, not infinity, and a product that
-  is −0 comes out 0, so the msgpack decoder makes its own infinity and puts
-  a float's sign on by negation.
 
 ## Licence
 
