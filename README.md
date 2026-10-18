@@ -28,9 +28,8 @@ in two layers:
   every redraw.
 - `require("hotty.plx")` is the **SDK layer** for plx scripts (SDK.md
   §4.2): surfaces at the cells of the script's tool or rail, which plx's
-  relay moves with it. plx documents it, with the limits of gopher-lua
-  that shape this code: plexos'
-  [`docs/PLX-SCRIPT.md`](https://github.com/neuroplastio/plexos/blob/main/docs/PLX-SCRIPT.md#hotty-from-lua-hottyplx).
+  relay moves with it. plx's own docs have how a script uses it, and the
+  limits of gopher-lua that shape this code.
 
 ```lua
 local hotty = require("hotty")
