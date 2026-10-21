@@ -1,0 +1,81 @@
+# Publishes hotty-lua to luarocks.org: the newest rockspec, and the source
+# rock LuaRocks packs from the tag it names. LuaRocks has no OIDC, so the
+# upload signs in with LUAROCKS_API_KEY, a repository secret: an API key of
+# anatolyrugalev, the luarocks.org account the rock belongs to. A publish is
+# the maintainer's go-ahead (gov P-5 rule 5).
+#
+# Add the next rockspec (hotty-X.Y.Z-R.rockspec, X.Y the hotty version the
+# SDK speaks, its source the tag vX.Y.Z, pushed; P-5 rule 6), then:
+#   gh workflow run publish.yml -R neuroplastio/hotty-lua
+# With -f dry_run=true it does everything but the upload: the gate, the
+# checks, and the source rock packed from the tag.
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Everything but the upload
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  # As ci.yml: hotty.nvim needs nvim_ui_send, new in 0.12.
+  NVIM_VERSION: v0.12.5
+  ACCOUNT: anatolyrugalev
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # Go, which builds glua for the gate, and stylua.
+      - uses: jdx/mise-action@v4
+      - name: luajit, lua5.1 and luarocks
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends luajit lua5.1 luarocks
+      - name: Neovim ${{ env.NVIM_VERSION }}
+        run: |
+          curl -fsSL "https://github.com/neovim/neovim/releases/download/$NVIM_VERSION/nvim-linux-x86_64.tar.gz" |
+            tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+      # The newest rockspec, its tag pushed, and not on luarocks.org yet.
+      # make check (tests/rockspec.lua) checks the rest: its MAJOR.MINOR is
+      # M.VERSION, its source the tag of its version, its modules lua/hotty/'s.
+      - name: rockspec
+        id: rockspec
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          spec=$(ls hotty-*.rockspec | sort -V | tail -1)
+          version=${spec#hotty-}; version=${version%.rockspec}
+          tag=v${version%-*}
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "::error::$spec's source is the tag $tag, which is not pushed"; exit 1
+          fi
+          if curl -sf -o /dev/null "https://luarocks.org/manifests/$ACCOUNT/$spec"; then
+            if [ "$DRY_RUN" = true ]; then
+              echo "::notice::$spec is on luarocks.org already; a dry run goes on"
+            else
+              echo "::error::$spec is on luarocks.org already: add the next rockspec"; exit 1
+            fi
+          fi
+          echo "spec=$spec" >> "$GITHUB_OUTPUT"
+          echo "publishing $spec, from $tag"
+      - name: gate
+        run: make check
+      - name: pack
+        if: ${{ inputs.dry_run }}
+        run: luarocks pack "${{ steps.rockspec.outputs.spec }}"
+      - name: publish
+        if: ${{ !inputs.dry_run }}
+        env:
+          LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}
+        run: luarocks upload --api-key="$LUAROCKS_API_KEY" "${{ steps.rockspec.outputs.spec }}"

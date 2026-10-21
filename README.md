@@ -13,10 +13,15 @@ version, a 0.3 one included, is no host to it, and the program draws in
 cells. [Upgrading from 0.3](#upgrading-from-03) and
 [from 0.2](#upgrading-from-02) list what callers change.
 
-0.4.x speaks hotty 0.4; the patch number is this repository's own.
-LuaRocks builds it from `hotty-0.4.0-1.rockspec`: `luarocks build
-hotty-0.4.0-1.rockspec` fetches the tag `v0.4.0`, and `luarocks make`
-builds a checkout. The rock is not on luarocks.org yet.
+0.4.x speaks hotty 0.4; the patch number is this repository's own. It is
+on luarocks.org as `hotty`, for Lua 5.1 and LuaJIT:
+
+```
+luarocks install hotty
+```
+
+`luarocks make` builds a checkout, from its rockspec
+(`hotty-0.4.0-1.rockspec`).
 
 It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/v0.4.0/SDK.md)
 in two layers:
@@ -329,6 +334,11 @@ tests need it), drives it over RPC, and reads what the host was sent.
 
 CI (`.github/workflows/ci.yml`) runs `make check` on GitHub's hosted
 Ubuntu, with Neovim 0.12.5, and checks that the vectors are the spec's.
+
+A release adds the next rockspec, `hotty-X.Y.Z-R.rockspec`, whose source
+is the tag `vX.Y.Z`. Once the tag is pushed, `.github/workflows/publish.yml`
+(`gh workflow run publish.yml`) runs the gate and uploads the rockspec and
+its source rock to luarocks.org.
 
 `make e2e`, outside the gate, runs the click example in hottyterm, a native
 host, on the private headless display of hotty-blitz's
