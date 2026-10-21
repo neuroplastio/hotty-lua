@@ -13,7 +13,12 @@ version, a 0.3 one included, is no host to it, and the program draws in
 cells. [Upgrading from 0.3](#upgrading-from-03) and
 [from 0.2](#upgrading-from-02) list what callers change.
 
-It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/main/SDK.md)
+0.4.x speaks hotty 0.4; the patch number is this repository's own.
+LuaRocks builds it from `hotty-0.4.0-1.rockspec`: `luarocks build
+hotty-0.4.0-1.rockspec` fetches the tag `v0.4.0`, and `luarocks make`
+builds a checkout. The rock is not on luarocks.org yet.
+
+It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/v0.4.0/SDK.md)
 in two layers:
 
 - `require("hotty")` is the **wire layer** (SDK.md §3): it builds commands,
@@ -311,6 +316,10 @@ session:surface("card", {
 - hotty.plx's tests, `tests/plx.lua`, against a fake plx-script (a `ctx`
   with the primitives, and `plx.after` on a clock the test turns), and the
   plx example in it.
+
+And under luajit, `tests/rockspec.lua`: the newest rockspec's MAJOR.MINOR is
+`M.VERSION`, its source is its version's tag, and it builds every module in
+`lua/hotty/`.
 
 And under `nvim -l`, `tests/nvim/run.lua`: each test runs a Neovim in a
 pseudo-terminal, plays its terminal with a fake host

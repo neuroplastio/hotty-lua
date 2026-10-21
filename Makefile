@@ -17,9 +17,9 @@ export HOTTY_DIR
 # One target at a time: the Neovim tests run on timers.
 .NOTPARALLEL:
 
-.PHONY: check fmt fmt-fix core nvim e2e vectors clean
+.PHONY: check fmt fmt-fix core rockspec nvim e2e vectors clean
 
-check: fmt core nvim   ## the gate
+check: fmt core rockspec nvim   ## the gate
 
 fmt:   ## fails when stylua would change files
 	$(STYLUA) --check $(wildcard lua tests examples)
@@ -34,6 +34,9 @@ core: $(GLUA)   ## the conformance vectors, the unit tests and hotty.plx's, unde
 		$$r tests/unit.lua || exit 1; \
 		$$r tests/plx.lua || exit 1; \
 	done
+
+rockspec:   ## the newest rockspec: its MAJOR.MINOR is M.VERSION (gov P-5 rule 6), its source its tag, its modules lua/hotty's
+	luajit tests/rockspec.lua $(wildcard hotty-*.rockspec)
 
 nvim:   ## hotty.nvim, in a Neovim whose terminal is a fake host (tests/nvim)
 	$(NVIM) -l tests/nvim/run.lua
