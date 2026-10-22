@@ -28,7 +28,7 @@ local function load(path)
 	return spec
 end
 
--- "0.4.0-1" as { 0, 4, 0, 1 }, or nil.
+-- "0.5.0-1" as { 0, 5, 0, 1 }, or nil.
 local function numbers(version)
 	local a, b, c, r = (version or ""):match("^(%d+)%.(%d+)%.(%d+)%-(%d+)$")
 	return a and { tonumber(a), tonumber(b), tonumber(c), tonumber(r) }

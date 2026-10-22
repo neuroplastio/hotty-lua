@@ -50,7 +50,7 @@ end
 -- plx's query, msgpack.
 local function caps(surfaces)
 	return mp.pack({
-		v = "0.4",
+		v = "0.5",
 		features = { "hover" },
 		cellcss = { w = mp.float(9), h = mp.float(18) },
 		scheme = "dark",
@@ -97,7 +97,7 @@ local function new_ctx(raw, cols, rows)
 		if not self.raw then
 			return nil
 		end
-		return { v = "0.4", host = "fake", scheme = "dark", dark = true, raw = self.raw }
+		return { v = "0.5", host = "fake", scheme = "dark", dark = true, raw = self.raw }
 	end
 	function ctx:hotty_send(s)
 		if not self.raw then
@@ -211,14 +211,14 @@ end)
 test("capabilities that do not decode, or name another version or none: text", function()
 	for _, raw in ipairs({
 		"",
-		'{"v":"0.4"}', -- JSON, as plx relayed 0.1's
-		mp.pack({ v = "0.4", scale = 2 }), -- an int for a float
-		mp.pack({ v = "0.4", cellcss = { w = 9, h = 18 } }), -- ints for a cell's floats
+		'{"v":"0.5"}', -- JSON, as plx relayed 0.1's
+		mp.pack({ v = "0.5", scale = 2 }), -- an int for a float
+		mp.pack({ v = "0.5", cellcss = { w = 9, h = 18 } }), -- ints for a cell's floats
 		mp.pack({ host = "fake" }),
 		mp.pack({ v = "" }),
 		mp.pack({ v = "0.1" }),
 		mp.pack({ v = "0.2" }),
-		mp.pack({ v = "0.3,0.4" }),
+		mp.pack({ v = "0.4,0.5" }),
 	}) do
 		local s = setup({ raw = raw })
 		eq(s.mode, hotty.TEXT, raw)

@@ -581,9 +581,9 @@ test("reveal: where in the value, none for the nearest; features say what a host
 	ops = ops_of(hotty.reveal("x", "s3"))
 	eq(ops[1].v, nil)
 	eq(ops[1].t, "s3")
-	local c = hotty.caps(mp.pack({ v = "0.4" }))
+	local c = hotty.caps(mp.pack({ v = "0.5" }))
 	eq(c:has("hover"), false, "a host that lists no features")
-	c = hotty.caps(mp.pack({ v = "0.4", features = { "hover", "menu" } }))
+	c = hotty.caps(mp.pack({ v = "0.5", features = { "hover", "menu" } }))
 	eq(c:has("hover"), true)
 	eq(c:has("menu"), true)
 	eq(c:has("count"), false)
@@ -726,11 +726,11 @@ test("bodies: a nil, a key that is not a str or a key given twice, in any field"
 		nil,
 		"nil in a field the SDK does not know"
 	)
-	eq(caps(hex("82 a1 76 a3 302e34 a8 6665617475726573 92 a1 61 c0")), nil, "nil at an array's end")
-	eq(caps(hex("82 a1 76 a3 302e34 01 02")), nil, "a key that is not a str where fields are read")
-	eq(caps(hex("82 a1 76 a3 302e34 a8 6665617475726573 81 01 a1 61")), nil, "a map keyed 1 to n for an array")
+	eq(caps(hex("82 a1 76 a3 302e35 a8 6665617475726573 92 a1 61 c0")), nil, "nil at an array's end")
+	eq(caps(hex("82 a1 76 a3 302e35 01 02")), nil, "a key that is not a str where fields are read")
+	eq(caps(hex("82 a1 76 a3 302e35 a8 6665617475726573 81 01 a1 61")), nil, "a map keyed 1 to n for an array")
 	eq(
-		caps(hex("82 a1 76 a3 302e34 a6 667574757265 81 c4 01 78 a1 61")),
+		caps(hex("82 a1 76 a3 302e35 a6 667574757265 81 c4 01 78 a1 61")),
 		nil,
 		"a bin key in a field the SDK does not know"
 	)
@@ -741,7 +741,7 @@ end)
 -- a bin, a timestamp or an extension of another type, which kinds marks,
 -- is no field's type (docs/plx.md).
 test("typed reading: a known field of another kind fails the body", function()
-	local V = "a1 76 a3 302e34 " -- v: "0.4"
+	local V = "a1 76 a3 302e35 " -- v: "0.5"
 	-- A body of v and n - 1 fields more.
 	local function cap(n, h)
 		return caps(hex(string.format("%02x ", 0x80 + n) .. V .. h))
@@ -764,17 +764,17 @@ test("typed reading: a known field of another kind fails the body", function()
 		7,
 		"a1 61 c4 01 78 a1 62 d6 ff 00000001 a1 63 d4 05 00 a1 64 cb 3ff0000000000000 a1 65 90 a1 66 92 c4 00 d4 05 00"
 	)
-	eq(c and c.v, "0.4", "unknown fields of every kind")
+	eq(c and c.v, "0.5", "unknown fields of every kind")
 	eq(c.raw.a, "x")
 	eq(cap(3, "a3 6e6574 81 a1 61 90 a3 6e6574 80"), nil, "a key given twice")
-	eq(caps(hex("de 0001 " .. V)).v, "0.4", "a map 16")
-	eq(caps(hex("df 00000001 " .. V)).v, "0.4", "a map 32")
+	eq(caps(hex("de 0001 " .. V)).v, "0.5", "a map 16")
+	eq(caps(hex("df 00000001 " .. V)).v, "0.5", "a map 32")
 
 	for _, x in ipairs({
-		{ "a1 76 c4 03 302e34", "a bin for a str" },
+		{ "a1 76 c4 03 302e35", "a bin for a str" },
 		{ "a1 76 d6 ff 00000001", "a timestamp for a str" },
 		{ "a1 76 d4 05 00", "an extension for a str" },
-		{ "a1 76 91 a3 302e34", "an array for a str" },
+		{ "a1 76 91 a3 302e35", "an array for a str" },
 	}) do
 		eq(caps(hex("81 " .. x[1])), nil, x[2])
 	end
@@ -815,9 +815,9 @@ test("typed reading: a known field of another kind fails the body", function()
 		eq(cap(2, x[1]), nil, x[2])
 	end
 	ok(cap(2, "a3 6e6574 81 a1 61 90"), "an empty array, in a map")
-	eq(caps(hex("92 a1 76 a3 302e34")), nil, "an array for the body")
-	eq(caps(hex("91 81 a1 76 a3 302e34")), nil, "a map in an array for the body")
-	eq(hotty.caps(hex("92 a1 76 a3 302e34")), nil, "an array for the body, as plx relays it")
+	eq(caps(hex("92 a1 76 a3 302e35")), nil, "an array for the body")
+	eq(caps(hex("91 81 a1 76 a3 302e35")), nil, "a map in an array for the body")
+	eq(hotty.caps(hex("92 a1 76 a3 302e35")), nil, "an array for the body, as plx relays it")
 
 	local function detail(kind, h)
 		return ev(kind, hex(h)).detail
@@ -848,13 +848,13 @@ end)
 
 test("caps: from a body's bytes, as plx relays them", function()
 	local c = hotty.caps(mp.pack({
-		v = "0.4",
+		v = "0.5",
 		scale = mp.float(2),
 		cellcss = { w = mp.float(9), h = mp.float(18) },
 		features = { "count" },
 		future = { 1, "x" },
 	}))
-	eq(c.v, "0.4")
+	eq(c.v, "0.5")
 	eq(c.scale, 2)
 	eq(c.cell_css.w, 9)
 	eq(c.cell_css.h, 18)
@@ -864,11 +864,11 @@ test("caps: from a body's bytes, as plx relays them", function()
 	eq(hotty.caps(""), nil)
 	eq(hotty.caps(nil), nil)
 	eq(hotty.caps("\1"), nil, "not a map")
-	eq(hotty.caps(mp.pack({ v = "0.4", scale = 2 })), nil, "an int for a float")
-	eq(hotty.caps(mp.pack({ v = "0.4", cellcss = { w = 9, h = 18 } })), nil, "ints for a cell's floats")
-	eq(hotty.caps(mp.pack({ v = "0.4" })).cell_css, nil, "none when the host said none")
-	eq(#hotty.caps(mp.pack({ v = "0.4" })).features, 0)
-	eq(hotty.caps(mp.pack({ v = "0.4", features = "menu" })), nil, "a str for an array")
+	eq(hotty.caps(mp.pack({ v = "0.5", scale = 2 })), nil, "an int for a float")
+	eq(hotty.caps(mp.pack({ v = "0.5", cellcss = { w = 9, h = 18 } })), nil, "ints for a cell's floats")
+	eq(hotty.caps(mp.pack({ v = "0.5" })).cell_css, nil, "none when the host said none")
+	eq(#hotty.caps(mp.pack({ v = "0.5" })).features, 0)
+	eq(hotty.caps(mp.pack({ v = "0.5", features = "menu" })), nil, "a str for an array")
 	eq(caps(""), nil, "an ok reply to q with no body")
 end)
 
@@ -1188,8 +1188,8 @@ test("doc's scroll: the axes as given; nil and 0 send no key", function()
 end)
 
 test("query: the SDK's version, and late after it", function()
-	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.4\27\\\27[c")
-	eq(hotty.query(3, { late = true }), "\27]7279;a=q:n=3:v=0.4:late=1\27\\\27[c")
+	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.5\27\\\27[c")
+	eq(hotty.query(3, { late = true }), "\27]7279;a=q:n=3:v=0.5:late=1\27\\\27[c")
 	eq(hotty.withdraw_late(), "\27]7279;a=q:q=2\27\\", "no version")
 	local last = hotty.CODES[#hotty.CODES]
 	eq(last, hotty.EVERSION)
@@ -1484,7 +1484,7 @@ test("features: named, and asked with has", function()
 	eq(table.concat(hotty.FEATURES, " "), "passthrough hover count menu")
 	eq(hotty.FEATURE_MENU, "menu")
 	eq(hotty.MENU_DEPTH, 8)
-	eq(hotty.VERSION, "0.4")
+	eq(hotty.VERSION, "0.5")
 	eq(hotty.REVEAL_START, "start")
 	eq(hotty.reveal("x", "t", hotty.REVEAL_NEAREST), hotty.reveal("x", "t"))
 end)
@@ -1704,7 +1704,7 @@ test("detector: a reply to the query is a host only in the SDK's version", funct
 	end
 	for _, r in ipairs({
 		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.2" })),
-		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.3,0.4" })),
+		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.4,0.5" })),
 		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "" })),
 		reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }),
 		reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }),
@@ -1722,9 +1722,9 @@ test("detector: a reply to the query is a host only in the SDK's version", funct
 	local d = hotty.detector({ late = true })
 	d:start(0)
 	d:reply(reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }), 10)
-	eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.4" })), 20), true)
+	eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.5" })), 20), true)
 	eq(d.state, hotty.NATIVE, "with late, a host after the error")
-	eq(d.caps.v, "0.4")
+	eq(d.caps.v, "0.5")
 end)
 
 -- keys, field -------------------------------------------------------------------

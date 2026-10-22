@@ -5,25 +5,26 @@ HTML over the TTY. With it, a Lua program shows small HTML documents, called
 surfaces, on rectangles of cells, and hears what the user does in them. It
 is written for two places: Neovim plugins, and plx scripts.
 
-It speaks hotty 0.4: a host's replies and events carry msgpack bodies
+It speaks hotty 0.5: a host's replies and events carry msgpack bodies
 (SPEC §3.3), a delta is one list of ops (SPEC §6.1), keys are named as
 myelin key names 0.1 names them (SPEC §10.4), and its query lists the
-version it speaks (`a=q:n=1:v=0.4`, SPEC §4). A terminal of another hotty
-version, a 0.3 one included, is no host to it, and the program draws in
-cells. [Upgrading from 0.3](#upgrading-from-03) and
-[from 0.2](#upgrading-from-02) list what callers change.
+version it speaks (`a=q:n=1:v=0.5`, SPEC §4). A terminal of another hotty
+version, a 0.4 one included, is no host to it, and the program draws in
+cells. [Upgrading from 0.4](#upgrading-from-04),
+[from 0.3](#upgrading-from-03) and [from 0.2](#upgrading-from-02) list what callers change.
 
-0.4.x speaks hotty 0.4; the patch number is this repository's own. It is
-on luarocks.org as `hotty`, for Lua 5.1 and LuaJIT:
+0.5.x speaks hotty 0.5; the patch number is this repository's own. It is
+on luarocks.org as `hotty` (0.4.x so far; 0.5.0 is not published yet), for
+Lua 5.1 and LuaJIT:
 
 ```
 luarocks install hotty
 ```
 
 `luarocks make` builds a checkout, from its rockspec
-(`hotty-0.4.0-1.rockspec`).
+(`hotty-0.5.0-1.rockspec`).
 
-It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/v0.4.0/SDK.md)
+It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/v0.5.0/SDK.md)
 in two layers:
 
 - `require("hotty")` is the **wire layer** (SDK.md §3): it builds commands,
@@ -68,7 +69,7 @@ an error.
 | constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `MOD_SHIFT`, `MOD_ALT`, `MOD_CTRL`, `MOD_SUPER`, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
-| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `touch`, `sync` |
+| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `set_field`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `touch`, `sync` |
 | ops (§3.4.3) | `morph`, `inner`, `replace`, `append`, `prepend`, `before`, `after`, `remove`, `attr`, `unattr`, `text`, `var`, `reveal_op`: each returns an op, a table with `op`, `target`, `key` and `value`; `delta(surface, ops, opts)` sends a list of them as one delta |
 | reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL`. `q` goes out only where the wire does not imply it |
 | Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover` (`true` is on, `false` is off, `nil` sends nothing: they belong to the surface), `keep_cursor` |
@@ -103,6 +104,16 @@ Where Lua differs:
   items } } }`; `enabled` is true when `nil`. `menu_of` reads one the same
   way, with `""` for what the body leaves out and `enabled` false where it is
   absent.
+- **A FieldChange** is a table, `{ rev, value, from, to, text, sel, checked }`,
+  each but `rev` absent (`nil`) unless given, so an empty `value` or `text`
+  and a position 0 are sent; `sel` is `{ anchor, caret }`. `set_field(surface,
+  target, change, opts)` (SPEC §6.4) changes a control unless the user has
+  since the `rev` the program last heard (`ev:rev()`); it replies on error
+  (`q` 1), and `ESTALE` means the user typed first: do nothing, decide again
+  from the next `input`. Positions are bytes of the value's UTF-8, which is
+  what Lua's `#` and `string.sub` count. `ev:sel()` is `{ anchor, caret }`, in
+  an `input` or a `caret` event (`data-on~=caret`). The sessions have
+  `surface:set_field(target, change, opts)`.
 - **Touch areas** are tables, `{ c, r, w, h, drag }`: the screen's cells
   where a finger drags as the mouse (SPEC §9.6), counted from 0, and
   `"x"`, `"y"` or `"xy"`. `touch(areas)` names them for the screen it is
@@ -145,6 +156,21 @@ Where Lua differs:
   and the body does not decode. An int further than 2^53 − 1 from 0 does
   not decode either. [`docs/plx.md`](docs/plx.md) has the contract.
 
+## Upgrading from 0.4
+
+What a caller changes (SDK.md Appendix E). A program and its tests' fake hosts
+move together:
+
+- **`input` and `change` carry `rev`**: `ev:rev()`. A test that expects their
+  detail exactly expects it too.
+- **Complete a field with `set_field`**, not a new element: it sends the `rev`
+  last heard, and the caret goes after the text.
+- **`ESTALE` is not a failure.** The user typed first; wait for the next
+  `input`, and do not resend with the `rev` the detail names.
+- **`caret`** (`EVENT_CARET`) is a new event kind, and `input` carries `sel`
+  for a field with `data-on~=caret`.
+- **The version is `"0.5"`**: a 0.4 host is no host.
+
 ## Upgrading from 0.3
 
 What a caller changes (SDK.md Appendix D). A program, its `data-keys` and
@@ -168,7 +194,7 @@ menus, and its tests' fake hosts move together:
   it types (`ctrl+key_w`, `ctrl+w`).
 - **`MOD_CONTROL` and `MOD_META`** are `MOD_CTRL` and `MOD_SUPER`, with the
   same bits.
-- **The version is `"0.4"`** alone: a 0.3 host is no host.
+- **The version is `"0.5"`** alone: a 0.4 host is no host.
 
 ## Upgrading from 0.2
 

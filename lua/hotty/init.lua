@@ -29,7 +29,7 @@ M.NUMBER = "7279" -- the OSC number
 M.CHUNK = 4096 -- the most base64 bytes in one sequence
 M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
-M.VERSION = "0.4" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
+M.VERSION = "0.5" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
 M.SCAN_MAX = 65536 -- the longest hotty sequence a Scanner takes
 
@@ -37,6 +37,7 @@ M.SCAN_MAX = 65536 -- the longest hotty sequence a Scanner takes
 M.EVENT_CLICK = "click"
 M.EVENT_CHANGE = "change"
 M.EVENT_INPUT = "input"
+M.EVENT_CARET = "caret"
 M.EVENT_SUBMIT = "submit"
 M.EVENT_PRESS = "press"
 M.EVENT_FOCUS = "focus"
@@ -53,6 +54,7 @@ M.EVENTS = {
 	"click",
 	"change",
 	"input",
+	"caret",
 	"submit",
 	"press",
 	"focus",
@@ -74,8 +76,9 @@ M.ENOTARGET = "ENOTARGET"
 M.EDETACHED = "EDETACHED"
 M.EQUOTA = "EQUOTA"
 M.EBUDGET = "EBUDGET"
+M.ESTALE = "ESTALE"
 M.EVERSION = "EVERSION"
-M.CODES = { "EINVAL", "ENOENT", "ENOTARGET", "EDETACHED", "EQUOTA", "EBUDGET", "EVERSION" }
+M.CODES = { "EINVAL", "ENOENT", "ENOTARGET", "EDETACHED", "EQUOTA", "EBUDGET", "ESTALE", "EVERSION" }
 
 -- Delta ops (SPEC §6.1).
 M.OP_MORPH = "morph"
@@ -796,6 +799,46 @@ function M.touch(areas, opts)
 	return command({ { "a", "touch" } }, join(out, #out), M.NO_REPLY, opts)
 end
 
+--- Changes a control the user may be changing, unless they have since the
+--- control's rev (SPEC §6.4): a host that finds it stale changes nothing and
+--- answers ESTALE, and the program decides again from the next input it
+--- hears. change is a FieldChange, a table: rev, the control's revision the
+--- program last heard (Event:rev), and value, from, to, text, sel ({ anchor,
+--- caret }) and checked, each absent unless given, so that an empty value
+--- or text and a position 0 are sent. Positions are bytes of the value's
+--- UTF-8. It goes out as one map of rev and the fields given, in that
+--- order, and checks none of them: the host does. It replies on error
+--- (default q=1), since a program must hear ESTALE. opts: n, q.
+function M.set_field(surface, target, change, opts)
+	local out = { "" }
+	local n = 1
+	local function add(k, v)
+		n = n + 1
+		out[n] = mp_str(k) .. v
+	end
+	add("rev", mp_int(change.rev))
+	if change.value ~= nil then
+		add("value", mp_str(change.value))
+	end
+	if change.from ~= nil then
+		add("from", mp_int(change.from))
+	end
+	if change.to ~= nil then
+		add("to", mp_int(change.to))
+	end
+	if change.text ~= nil then
+		add("text", mp_str(change.text))
+	end
+	if change.sel ~= nil then
+		add("sel", mp_array(2) .. mp_int(change.sel[1]) .. mp_int(change.sel[2]))
+	end
+	if change.checked ~= nil then
+		add("checked", change.checked and "\195" or "\194")
+	end
+	out[1] = mp_map(n - 1)
+	return command({ { "a", "field" }, { "s", surface }, { "t", target } }, join(out, n), M.REPLY_ON_ERROR, opts)
+end
+
 --- Commands already built, bracketed in synchronized output, so the host
 --- shows all of them or none (SPEC §6.3). Takes the commands as arguments or
 --- as one list.
@@ -867,8 +910,9 @@ local CAPS = {
 local DETAIL = {
 	click = { value = "str", href = "str", url = "str", area = AREA, mods = "int", count = "int" },
 	press = { area = AREA, mods = "int" },
-	change = { checked = "bool", value = "str" },
-	input = { value = "str" },
+	change = { checked = "bool", value = "str", rev = "int" },
+	input = { value = "str", rev = "int", sel = { "int" } },
+	caret = { sel = { "int" }, rev = "int" },
 	submit = { fields = { { "str" } } },
 	fit = { r = "int" },
 	dragstart = DRAG,
@@ -1119,6 +1163,30 @@ function Event:value()
 		return nil
 	end
 	return self.detail.value
+end
+
+--- The control's revision (SPEC §6.4), an int: change, input, caret. It is
+--- what set_field sends back as rev.
+function Event:rev()
+	local k = self.kind
+	if k ~= M.EVENT_CHANGE and k ~= M.EVENT_INPUT and k ~= M.EVENT_CARET then
+		return nil
+	end
+	return self.detail.rev
+end
+
+--- The selection, { anchor, caret }, in bytes of the value's UTF-8 (SPEC
+--- §6.4): input and caret, of a field with data-on~=caret.
+function Event:sel()
+	local k = self.kind
+	if k ~= M.EVENT_INPUT and k ~= M.EVENT_CARET then
+		return nil
+	end
+	local s = self.detail.sel
+	if type(s) ~= "table" or #s ~= 2 then
+		return nil
+	end
+	return { s[1], s[2] }
 end
 
 --- The detail's checked, a boolean: change.

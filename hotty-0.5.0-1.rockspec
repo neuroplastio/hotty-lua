@@ -2,15 +2,15 @@ rockspec_format = "3.0"
 package = "hotty"
 -- MAJOR.MINOR is the hotty version the SDK speaks (M.VERSION), and PATCH this
 -- repository's own (gov P-5 rule 6); the revision after "-" is the rockspec's.
-version = "0.4.0-1"
+version = "0.5.0-1"
 source = {
 	url = "git+https://github.com/neuroplastio/hotty-lua.git",
-	tag = "v0.4.0",
+	tag = "v0.5.0",
 }
 description = {
 	summary = "The Lua SDK for hotty, HTML over the TTY, for Neovim plugins and plx scripts",
 	detailed = [[
-hotty-lua speaks hotty 0.4. require("hotty") is the wire layer: it builds
+hotty-lua speaks hotty 0.5. require("hotty") is the wire layer: it builds
 commands, decodes what the host sends, cuts hotty sequences out of a byte
 stream, decides whether the terminal is a host, and names keys and keymaps,
 with no I/O. require("hotty.nvim") and require("hotty.plx") are the SDK

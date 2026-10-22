@@ -247,6 +247,8 @@ local function build(b)
 		return hotty.menu_show(a.keys, opts)
 	elseif name == "menu_hide" then
 		return hotty.menu_hide(opts)
+	elseif name == "set_field" then
+		return hotty.set_field(a.surface, a.target, a.change, opts)
 	elseif name == "touch" then
 		return hotty.touch(a.areas, opts)
 	elseif name == "sync" then
@@ -365,6 +367,8 @@ local function event_view(e)
 		target = e.target,
 		value = e:value(),
 		checked = e:checked(),
+		rev = e:rev(),
+		sel = e:sel(),
 		fields = e:fields(),
 		link = href and { href = href, url = url } or nil,
 		mods = e:mods(),

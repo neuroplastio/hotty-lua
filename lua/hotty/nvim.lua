@@ -1091,6 +1091,12 @@ function Surface:reveal(target, where, opts)
 	return self:send(hotty.reveal(self.id, target, where, opts))
 end
 
+--- Changes a control unless the user has since change.rev (SPEC §6.4);
+--- change is hotty.set_field's FieldChange. Replies on error: ESTALE is heard.
+function Surface:set_field(target, change, opts)
+	return self:send(hotty.set_field(self.id, target, change, opts))
+end
+
 function Surface:focus(target, opts)
 	return self:send(hotty.focus(self.id, target, opts))
 end
