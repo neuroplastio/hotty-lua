@@ -5,26 +5,27 @@ HTML over the TTY. With it, a Lua program shows small HTML documents, called
 surfaces, on rectangles of cells, and hears what the user does in them. It
 is written for two places: Neovim plugins, and plx scripts.
 
-It speaks hotty 0.5: a host's replies and events carry msgpack bodies
+It speaks hotty 0.6: a host's replies and events carry msgpack bodies
 (SPEC §3.3), a delta is one list of ops (SPEC §6.1), keys are named as
 myelin key names 0.1 names them (SPEC §10.4), and its query lists the
-version it speaks (`a=q:n=1:v=0.5`, SPEC §4). A terminal of another hotty
-version, a 0.4 one included, is no host to it, and the program draws in
-cells. [Upgrading from 0.4](#upgrading-from-04),
-[from 0.3](#upgrading-from-03) and [from 0.2](#upgrading-from-02) list what callers change.
+version it speaks (`a=q:n=1:v=0.6`, SPEC §4). A terminal of another hotty
+version, a 0.5 one included, is no host to it, and the program draws in
+cells. [Upgrading from 0.5](#upgrading-from-05),
+[from 0.4](#upgrading-from-04), [from 0.3](#upgrading-from-03) and
+[from 0.2](#upgrading-from-02) list what callers change.
 
-0.5.x speaks hotty 0.5; the patch number is this repository's own. It is
-on luarocks.org as `hotty` (0.4.x so far; 0.5.0 is not published yet), for
-Lua 5.1 and LuaJIT:
+0.6.x speaks hotty 0.6; the patch number is this repository's own. It is
+on luarocks.org as `hotty` (0.6.0 is not published yet), for Lua 5.1 and
+LuaJIT:
 
 ```
 luarocks install hotty
 ```
 
 `luarocks make` builds a checkout, from its rockspec
-(`hotty-0.5.0-1.rockspec`).
+(`hotty-0.6.0-1.rockspec`).
 
-It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/v0.5.0/SDK.md)
+It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/v0.6.0/SDK.md)
 in two layers:
 
 - `require("hotty")` is the **wire layer** (SDK.md §3): it builds commands,
@@ -72,7 +73,7 @@ an error.
 | commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `set_field`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `touch`, `sync` |
 | ops (§3.4.3) | `morph`, `inner`, `replace`, `append`, `prepend`, `before`, `after`, `remove`, `attr`, `unattr`, `text`, `var`, `reveal_op`: each returns an op, a table with `op`, `target`, `key` and `value`; `delta(surface, ops, opts)` sends a list of them as one delta |
 | reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL`. `q` goes out only where the wire does not imply it |
-| Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover` (`true` is on, `false` is off, `nil` sends nothing: they belong to the surface), `keep_cursor` |
+| Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover` (`true` is on, `false` is off, `nil` sends nothing: they belong to the surface), `keep_cursor`, `backdrop` (`true` sends `b=1`, after `z`: under the cells, on a host whose features list `backdrop`; it belongs to the placement, as `z` does) |
 | a host or a relay | `delta_of(msg)` (the ops, or `nil` and an EINVAL error with `op` the index at fault), `menu_of(msg)`, `menu_show_of(msg)`, `menu_level_of(tree, platform, seq)`, `menu_find(tree, name)`, `read_key(platform, name)` |
 | names (§3.5) | `valid_name(s)`, `surface_name(s)` |
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
@@ -156,6 +157,25 @@ Where Lua differs:
   and the body does not decode. An int further than 2^53 − 1 from 0 does
   not decode either. [`docs/plx.md`](docs/plx.md) has the contract.
 
+## Upgrading from 0.5
+
+What a caller changes (SDK.md Appendix F). A program and its tests' fake hosts
+move together:
+
+- **A backdrop is a placement's `backdrop = true`**: `b=1`, under the cells.
+  It belongs to the placement, as `z` does, so each placement says it
+  again, and `false` or `nil` sends nothing, never `b=0`.
+- **Ask before placing one**: `caps:has(hotty.FEATURE_BACKDROP)`. A host
+  without the feature ignores `b` and draws the surface over the text, so
+  draw in cells instead.
+- **A backdrop never has the keyboard.** `focus` on one is `EINVAL`, and a
+  focused surface placed as one sends `blur`. Hidden, a surface is no
+  backdrop until a placement makes it one.
+- **Enter commits a text field, in a form or not.** Enter in an `input` the
+  user changed sends `change`, and in a form `change` then `submit`. A
+  program that read a lone field only on `blur` hears it on Enter too.
+- **The version is `"0.6"`**: a 0.5 host is no host.
+
 ## Upgrading from 0.4
 
 What a caller changes (SDK.md Appendix E). A program and its tests' fake hosts
@@ -169,7 +189,7 @@ move together:
   `input`, and do not resend with the `rev` the detail names.
 - **`caret`** (`EVENT_CARET`) is a new event kind, and `input` carries `sel`
   for a field with `data-on~=caret`.
-- **The version is `"0.5"`**: a 0.4 host is no host.
+- **The version is `"0.6"`**: a 0.5 host is no host.
 
 ## Upgrading from 0.3
 
@@ -194,7 +214,7 @@ menus, and its tests' fake hosts move together:
   it types (`ctrl+key_w`, `ctrl+w`).
 - **`MOD_CONTROL` and `MOD_META`** are `MOD_CTRL` and `MOD_SUPER`, with the
   same bits.
-- **The version is `"0.5"`** alone: a 0.4 host is no host.
+- **The version is `"0.6"`** alone: a 0.5 host is no host.
 
 ## Upgrading from 0.2
 
@@ -317,9 +337,10 @@ session:surface("card", {
   decoration provider's `on_end`), since `nvim_ui_send`'s bytes go out at
   once while the TUI writes its frame when it flushes: sent from the event
   itself, a placement would land before the cells it goes with.
-- **Floating windows and the popup menu** are cells, and every placement is
-  above the cells (SPEC §5.2), so a surface they would cover is hidden while
-  they do (`occlude = false` turns that off).
+- **Floating windows and the popup menu** are cells, and every placement
+  the session sends is above the cells (it places no backdrop, SPEC §5.2),
+  so a surface they would cover is hidden while they do (`occlude = false`
+  turns that off).
 - **Flags.** A surface's `press`, `fit` and `hover` are sent with the
   placement when they change, not with every one (SPEC §5.2).
 - **What the host loses** (`ENOENT` in answer to a placement) is sent again.
