@@ -117,7 +117,8 @@ M.FEATURE_PASSTHROUGH = "passthrough" -- the pointer passes through the parts of
 M.FEATURE_HOVER = "hover" -- it says where the pointer is, with hover events (SPEC §9.4)
 M.FEATURE_COUNT = "count" -- it says that a click repeats one before it (SPEC §9)
 M.FEATURE_MENU = "menu" -- it keeps a program's menu, shows its levels and lets the user pick from it (SPEC §10.7)
-M.FEATURES = { "passthrough", "hover", "count", "menu" }
+M.FEATURE_BACKDROP = "backdrop" -- it draws a placement with b=1 under the cells, as a backdrop (SPEC §5.2)
+M.FEATURES = { "passthrough", "hover", "count", "menu", "backdrop" }
 
 -- The modifier keys held during a click, a press or a drag, as the bits of
 -- Event:mods (SPEC §9).
@@ -365,9 +366,13 @@ function M.doc(surface, html, opts)
 end
 
 -- A placement's control (SDK.md §3.4.1). A placement is a table: cols, rows
--- (0 or nil is auto), window {x, y, w, h}, z, press, fit, hover, keep_cursor.
--- press, fit and hover belong to the surface (SPEC §5.2), so each is true
--- (p=1), false (p=0) or nil, which sends nothing and leaves it as it was.
+-- (0 or nil is auto), window {x, y, w, h}, z, press, fit, hover, keep_cursor,
+-- backdrop. press, fit and hover belong to the surface (SPEC §5.2), so each
+-- is true (p=1), false (p=0) or nil, which sends nothing and leaves it as it
+-- was. backdrop, like z, is the placement's: true sends b=1, after z, and a
+-- host that lists the feature backdrop draws the placement under the cells;
+-- false or nil sends nothing, and the placement is above them. A host
+-- without the feature ignores b, so a program asks Caps:has first.
 local function placement_pairs(surface, pl)
 	local cols, rows = pl.cols or 0, pl.rows or 0
 	local p = {
@@ -390,6 +395,9 @@ local function placement_pairs(surface, pl)
 	end
 	if pl.z and pl.z ~= 0 then
 		p[#p + 1] = { "z", int(pl.z) }
+	end
+	if pl.backdrop then
+		p[#p + 1] = { "b", "1" }
 	end
 	for _, f in ipairs({ { "p", pl.press }, { "f", pl.fit }, { "v", pl.hover } }) do
 		if f[2] == true then
@@ -1372,7 +1380,8 @@ function Caps:merge(changed)
 end
 
 --- Whether the host has an optional feature (SPEC §4): "passthrough",
---- "hover", "count" or "menu". Everything else a 0.3 host does, it does.
+--- "hover", "count", "menu" or "backdrop". Everything else a host of its
+--- version does, it does.
 function Caps:has(feature)
 	return has(self.features, feature)
 end

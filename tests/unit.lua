@@ -1238,6 +1238,32 @@ test("place: p, f and v are on (1), off (0) or absent, and belong to the surface
 	eq(table.concat(keys, " "), "a s c r p v", "p, f, v in this order, after z")
 end)
 
+test("place: backdrop is b=1 after z, and nothing when false or nil (SPEC §5.2)", function()
+	local function keys(pl)
+		local _, m = hotty.decoder():feed(hotty.place("s", pl))
+		local out = {}
+		for _, k in ipairs(m.keys) do
+			out[#out + 1] = k .. "=" .. m.control[k]
+		end
+		return table.concat(out, " ")
+	end
+	eq(
+		keys({ cols = 40, rows = 10, z = -3, press = true, keep_cursor = true, backdrop = true }),
+		"a=place s=s c=40 r=10 z=-3 b=1 p=1 C=1",
+		"after z, before p, f, v and C"
+	)
+	eq(keys({ cols = 10, backdrop = true }), "a=place s=s c=10 r=auto b=1", "with no z")
+	eq(keys({ cols = 10, backdrop = false }), "a=place s=s c=10 r=auto", "false is above the cells: no b=0")
+	eq(hotty.place("s", { cols = 10, backdrop = false }), hotty.place("s", { cols = 10 }), "false is nil")
+	local pl = { cols = 80, rows = 24, backdrop = true }
+	local out = hotty.place_at("s", 0, 0, pl)
+	eq(out:sub(1, 8), "\27" .. "7\27[1;1H")
+	local _, m = hotty.decoder():feed(out:sub(9, -3))
+	eq(m.control.b, "1", "place_at keeps it")
+	eq(m.control.C, "1")
+	eq(pl.keep_cursor, nil, "and leaves the placement as it was")
+end)
+
 test("menu: a tree, each value in the smallest form; none leaves the program none", function()
 	local function body(cmd)
 		local _, m = hotty.decoder():feed(cmd)
@@ -1481,8 +1507,12 @@ test("events: mods are bits, 0 when absent; t is absent, not empty, where no ele
 end)
 
 test("features: named, and asked with has", function()
-	eq(table.concat(hotty.FEATURES, " "), "passthrough hover count menu")
+	eq(table.concat(hotty.FEATURES, " "), "passthrough hover count menu backdrop")
 	eq(hotty.FEATURE_MENU, "menu")
+	eq(hotty.FEATURE_BACKDROP, "backdrop")
+	local c = hotty.caps(mp.pack({ v = hotty.VERSION, features = { "hover", "backdrop" } }))
+	eq(c:has(hotty.FEATURE_BACKDROP), true)
+	eq(hotty.caps(mp.pack({ v = hotty.VERSION, features = { "hover" } })):has(hotty.FEATURE_BACKDROP), false)
 	eq(hotty.MENU_DEPTH, 8)
 	eq(hotty.VERSION, "0.5")
 	eq(hotty.REVEAL_START, "start")

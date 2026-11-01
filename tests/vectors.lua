@@ -191,6 +191,7 @@ local function placement(p)
 		fit = flag(p.fit),
 		hover = flag(p.hover),
 		keep_cursor = p.keep_cursor,
+		backdrop = p.backdrop,
 	}
 end
 
