@@ -29,7 +29,7 @@ M.NUMBER = "7279" -- the OSC number
 M.CHUNK = 4096 -- the most base64 bytes in one sequence
 M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
-M.VERSION = "0.5" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
+M.VERSION = "0.6" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
 M.SCAN_MAX = 65536 -- the longest hotty sequence a Scanner takes
 
