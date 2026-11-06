@@ -6,8 +6,9 @@
 --     DECRQM, the background colour; it follows the cursor through CUP and
 --     ESC 7 / ESC 8, so it knows where each placement lands, and an erase in
 --     display (ED 2 or 3) drops every placement, as hottyterm does;
---   - the host (when native): the query, answered in the one version it
---     speaks (version, "0.6") or with EVERSION, and every command, kept as
+--   - the host (when native): the query, answered in the highest version it
+--     shares with the query (versions, "0.7" and "0.6"; version names one) or
+--     with EVERSION, and every command, kept as
 --     surfaces and placements, with replies as SPEC §3.6 has them. It lays
 --     nothing out: r=auto gets auto_rows;
 --   - not a host, a multiplexer's pane with no terminal attached: it holds a
@@ -24,24 +25,29 @@ local M = {}
 local Host = {}
 Host.__index = Host
 
-local DEFAULT_CAPS = mp.pack({
-	v = "0.6",
-	cellcss = { w = mp.float(9), h = mp.float(18) },
-	scale = mp.float(1),
-	features = { "hover", "count", "menu" },
-	scheme = "dark",
-	-- message: the limit its decoder keeps (SPEC §13).
-	limits = { surfaces = 64, message = hotty.DEFAULT_MAX },
-	host = "fake",
-	version = "0.0.1",
-})
+-- The capabilities, v the version answered.
+local function caps_in(v)
+	return mp.pack({
+		v = v,
+		cellcss = { w = mp.float(9), h = mp.float(18) },
+		scale = mp.float(1),
+		features = { "hover", "count", "menu" },
+		scheme = "dark",
+		-- message: the limit its decoder keeps (SPEC §13).
+		limits = { surfaces = 64, message = hotty.DEFAULT_MAX },
+		host = "fake",
+		version = "0.0.1",
+	})
+end
 
 function M.new(opts)
 	opts = opts or {}
 	return setmetatable({
 		native = opts.native ~= false,
-		version = opts.version or "0.6", -- the one version it speaks
-		caps = opts.caps or DEFAULT_CAPS,
+		-- the versions it speaks, highest first; the session's is the one it answered
+		versions = opts.version and { opts.version } or opts.versions or { "0.7", "0.6" },
+		session = nil,
+		caps = opts.caps,
 		auto_rows = opts.auto_rows or 4,
 		scanner = hotty.scanner(),
 		decoder = hotty.decoder(),
@@ -97,36 +103,43 @@ function Host:answer(m, err, extra, detail)
 	return reply(ctl)
 end
 
--- Whether v, the versions a query lists, comma-separated, has version
--- exactly.
-local function lists(v, version)
+-- The highest of versions that v, the versions a query lists, comma-separated,
+-- also lists, or nil.
+local function shared(v, versions)
+	local listed = {}
 	for entry in ((v or "") .. ","):gmatch("([^,]*),") do
-		if entry == version then
-			return true
+		listed[entry] = true
+	end
+	for _, version in ipairs(versions) do
+		if listed[version] then
+			return version
 		end
 	end
-	return false
+	return nil
 end
 
--- Answers a query as a host that speaks one version does (SPEC §4): its
--- capabilities when the query lists that version, whatever else it lists,
--- and EVERSION, the version as its detail, when it lists another or none;
--- an error unless q is 2, an ok only when q is 0.
+-- Answers a query as a host does (SPEC §4): its capabilities, v the highest
+-- version the query shares with it, which is the session's from then on, and
+-- EVERSION, the versions it speaks (highest first, comma-separated) as its
+-- detail, when it shares none; an error unless q is 2, an ok only when q is 0.
+-- In a 0.6 session there is no secondary press (SPEC §15): this host reports
+-- no cells and keeps none, so it has nothing to do with Alt.
 function Host:query_reply(c)
 	local q = tonumber(c.q or "0") or 0
-	local speaks = lists(c.v, self.version)
-	if q >= 2 or (speaks and q ~= 0) then
+	local version = shared(c.v, self.versions)
+	if q >= 2 or (version and q ~= 0) then
 		return ""
 	end
-	local ctl = { { "a", speaks and "ok" or "err" } }
+	local ctl = { { "a", version and "ok" or "err" } }
 	if c.n then
 		ctl[#ctl + 1] = { "n", c.n }
 	end
 	ctl[#ctl + 1] = { "re", "q" }
-	if speaks then
-		return reply(ctl, self.caps)
+	if version then
+		self.session = version
+		return reply(ctl, self.caps or caps_in(version))
 	end
-	return reply(ctl, mp.pack({ code = "EVERSION", detail = self.version }))
+	return reply(ctl, mp.pack({ code = "EVERSION", detail = table.concat(self.versions, ",") }))
 end
 
 function Host:command(m)

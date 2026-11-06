@@ -50,7 +50,7 @@ end
 -- plx's query, msgpack.
 local function caps(surfaces)
 	return mp.pack({
-		v = "0.6",
+		v = "0.7",
 		features = { "hover" },
 		cellcss = { w = mp.float(9), h = mp.float(18) },
 		scheme = "dark",
@@ -97,7 +97,7 @@ local function new_ctx(raw, cols, rows)
 		if not self.raw then
 			return nil
 		end
-		return { v = "0.6", host = "fake", scheme = "dark", dark = true, raw = self.raw }
+		return { v = "0.7", host = "fake", scheme = "dark", dark = true, raw = self.raw }
 	end
 	function ctx:hotty_send(s)
 		if not self.raw then
@@ -219,10 +219,19 @@ test("capabilities that do not decode, or name another version or none: text", f
 		mp.pack({ v = "0.1" }),
 		mp.pack({ v = "0.2" }),
 		mp.pack({ v = "0.5,0.6" }),
+		mp.pack({ v = "99.0" }),
 	}) do
 		local s = setup({ raw = raw })
 		eq(s.mode, hotty.TEXT, raw)
 		eq(s.caps, nil)
+	end
+end)
+
+test("a host of either version it speaks is a host, and caps.v says which", function()
+	for _, v in ipairs({ "0.6", "0.7" }) do
+		local s = setup({ raw = mp.pack({ v = v, cellcss = { w = mp.float(9), h = mp.float(18) } }) })
+		eq(s.mode, hotty.NATIVE, v)
+		eq(s.caps.v, v)
 	end
 end)
 

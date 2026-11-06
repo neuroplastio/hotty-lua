@@ -29,7 +29,8 @@ M.NUMBER = "7279" -- the OSC number
 M.CHUNK = 4096 -- the most base64 bytes in one sequence
 M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
-M.VERSION = "0.6" -- the protocol version this SDK speaks, which its query lists (SPEC §4)
+M.VERSION = "0.7" -- the protocol version this SDK speaks first, the highest of VERSIONS (SPEC §4)
+M.VERSIONS = { "0.7", "0.6" } -- every version it speaks, highest first (SPEC §15); its query lists them lowest first
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
 M.SCAN_MAX = 65536 -- the longest hotty sequence a Scanner takes
 
@@ -332,12 +333,32 @@ local function command(pairs_, payload, default_q, opts)
 	return M.encode(pairs_, payload, opts)
 end
 
---- Asks whether the terminal is a host that speaks VERSION: a=q with n (1
---- if nil) and v, the versions the program speaks, fenced by DA1 (SPEC §4).
+--- The versions the query lists, lowest first, comma-separated ("0.6,0.7").
+function M.query_versions()
+	local list = {}
+	for i = #M.VERSIONS, 1, -1 do
+		list[#list + 1] = M.VERSIONS[i]
+	end
+	return table.concat(list, ",")
+end
+
+--- Whether version is one this SDK speaks (one of VERSIONS).
+function M.speaks(version)
+	for _, v in ipairs(M.VERSIONS) do
+		if v == version then
+			return true
+		end
+	end
+	return false
+end
+
+--- Asks whether the terminal is a host that speaks one of VERSIONS: a=q with
+--- n (1 if nil) and v, the versions the program speaks, lowest first, fenced
+--- by DA1 (SPEC §4).
 --- opts.late asks for a late answer (late=1): what stands between the
 --- program and the terminal may answer once there is a host.
 function M.query(n, opts)
-	local p = { { "a", "q" }, { "n", int(n or 1) }, { "v", M.VERSION } }
+	local p = { { "a", "q" }, { "n", int(n or 1) }, { "v", M.query_versions() } }
 	if opts and opts.late then
 		p[#p + 1] = { "late", "1" }
 	end
@@ -2080,7 +2101,7 @@ M.Detector = Detector
 --- A Detector decides whether the terminal is a host, with the time passed
 --- in, in milliseconds. opts.n is the query's number (1). A reply to the
 --- query makes the terminal a host when it is ok and its capabilities decode
---- and name VERSION; any other reply to it, an error (EVERSION or another)
+--- and name a version the query listed (caps.v says which); any other reply to it, an error (EVERSION or another)
 --- included, makes it text at once (SPEC §4). opts.late asks for a late
 --- answer: once the state is text, the first reply to the query that would
 --- make the terminal a host makes it one after all.
@@ -2161,11 +2182,11 @@ function Detector:reply(r, now)
 	if r and r.re == "q" and r.n == self.n then
 		took = true
 		-- A host this program can use: its capabilities decode, in the
-		-- version the query listed. An error, capabilities that do not decode
+		-- version the query listed (caps.v is the one the host answered in). An error, capabilities that do not decode
 		-- (a 0.1 host's JSON) or that name another version, or none, are no
 		-- host it can use.
 		local caps = r:caps()
-		if caps and caps.v ~= M.VERSION then
+		if caps and not M.speaks(caps.v) then
 			caps = nil
 		end
 		if self.state == M.DETECTING then

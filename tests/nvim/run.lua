@@ -192,7 +192,7 @@ test("a host: detected native, with its capabilities", function(spawn)
 		return t.lua("return T.mode") == "native"
 	end, "native")
 	eq(t.lua("return T.host"), "fake")
-	eq(t.lua("return T.term.caps.v"), "0.6")
+	eq(t.lua("return T.term.caps.v"), "0.7")
 	eq(t.host.queries, 1)
 	eq(t.host.problems, {})
 	return t
@@ -232,7 +232,7 @@ test(
 		wait(function()
 			return t.host.placements["t-card"] ~= nil
 		end, "the card's placement")
-		eq(t.lua("return T.term.caps.v"), "0.6")
+		eq(t.lua("return T.term.caps.v"), "0.7")
 		eq(t.host.queries, 1)
 		eq(t.host.problems, {})
 		return t
@@ -349,7 +349,9 @@ test("the fake host answers a query as the conformance vectors' hosts do", funct
 	f:close()
 	local ran = 0
 	for _, v in ipairs(data.vectors) do
-		local queries = v.requires == nil
+		-- This fake host speaks 0.6 as well (SDK.md §4.4), so it runs what a host
+		-- that does is asked.
+		local queries = v.requires == nil or (#v.requires == 1 and v.requires[1] == "speaks-0.6")
 		for _, st in ipairs(v.steps) do
 			queries = queries and st.send ~= nil and st.send.a == "q" and st.payload == nil
 		end
@@ -393,7 +395,33 @@ test("the fake host answers a query as the conformance vectors' hosts do", funct
 			end
 		end
 	end
-	eq(ran, 5, "query vectors run")
+	eq(ran, 6, "query vectors run")
+end)
+
+test("the host answers in the highest version a query shares, EVERSION when none", function()
+	local hotty = require("hotty")
+	local function answer(host, v)
+		local ctl = { { "a", "q" }, { "n", "1" } }
+		if v then
+			ctl[#ctl + 1] = { "v", v }
+		end
+		local seg = hotty.scanner():feed(host:feed(hotty.encode(ctl)))[1]
+		local _, m = hotty.decoder():feed(seg.data)
+		local r = m:reply()
+		if r.ok then
+			return (m:body()).v
+		end
+		return r.code .. " " .. r.detail
+	end
+	local host = fakehost.new()
+	eq(answer(host, "0.6,0.7"), "0.7")
+	eq(host.session, "0.7")
+	eq(answer(host, "0.6"), "0.6")
+	eq(host.session, "0.6", "a 0.6 session: no secondary press, Alt the terminal's")
+	eq(answer(host, "0.7"), "0.7")
+	eq(answer(host, "0.5"), "EVERSION 0.7,0.6")
+	eq(answer(fakehost.new({ version = "0.7" }), "0.6"), "EVERSION 0.7")
+	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.6,0.7\27\\\27[c")
 end)
 
 -- Placement -------------------------------------------------------------------
