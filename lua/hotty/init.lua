@@ -918,7 +918,7 @@ local CAPS = {
 -- Each kind's detail (SPEC §9); a kind not here carries none the SDK reads.
 local DETAIL = {
 	click = { value = "str", href = "str", url = "str", area = AREA, mods = "int", count = "int" },
-	press = { area = AREA, mods = "int" },
+	press = { area = AREA, mods = "int", button = "int", c = "int", r = "int" },
 	change = { checked = "bool", value = "str", rev = "int" },
 	input = { value = "str", rev = "int", sel = { "int" } },
 	caret = { sel = { "int" }, rev = "int" },
@@ -1234,6 +1234,35 @@ function Event:mods()
 		return self.detail.mods or 0
 	end
 	return 0
+end
+
+--- A press's button, the DOM's number (SPEC §9): 2 for a secondary press, from an
+--- element with secondary in its data-on. 0 when the detail has none, which is
+--- the primary button's, and for any other kind. A handler meaning the primary
+--- button checks that this is 0: a secondary press comes to it too.
+function Event:button()
+	if self.kind ~= M.EVENT_PRESS then
+		return 0
+	end
+	return self.detail.button or 0
+end
+
+--- A secondary press's cell, the pointer's column (SPEC §9); it may be
+--- negative. nil when the detail has none, as a primary press's has not, and
+--- for any other kind.
+function Event:c()
+	if self.kind ~= M.EVENT_PRESS then
+		return nil
+	end
+	return self.detail.c
+end
+
+--- A secondary press's cell, the pointer's row (SPEC §9); see Event:c.
+function Event:r()
+	if self.kind ~= M.EVENT_PRESS then
+		return nil
+	end
+	return self.detail.r
 end
 
 --- A link's click: its href, and its url, or nil when there is none.

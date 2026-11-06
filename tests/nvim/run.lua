@@ -134,6 +134,9 @@ local SETUP = [[
 		end,
 		on_event = function(ev, sf)
 			table.insert(T.events, { kind = ev.kind, target = ev.target, name = sf.name })
+			if ev.kind == "press" then
+				T.press = { button = ev:button(), c = ev:c(), r = ev:r() }
+			end
 		end,
 		on_error = function(err, sf)
 			table.insert(T.errors, { code = err.code, name = sf.name })
@@ -467,6 +470,17 @@ test("a click reaches the surface's handler, whose delta reaches the host", func
 	local d = t.host:commands("delta", "t-card")[1]
 	eq({ ops(d)[1].op, ops(d)[1].target, ops(d)[1].value, d.control.q }, { "text", "label", "clicked", "2" })
 	eq(t.lua("return T.events"), { { kind = "click", target = "go", name = "card" } })
+	return t
+end)
+
+test("a secondary press reaches the handler with its button and cell", function(spawn)
+	local t = spawn()
+	card(t)
+	t.send(t.host:event("t-card", "press", "go", { button = 2, c = 3, r = -1 }))
+	wait(function()
+		return t.lua("return T.press") ~= nil
+	end, "the press")
+	eq(t.lua("return T.press"), { button = 2, c = 3, r = -1 })
 	return t
 end)
 

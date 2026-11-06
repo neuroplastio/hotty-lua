@@ -80,7 +80,7 @@ an error.
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
 | keys (§3.10) | `parse_key(name)`, `read_key(platform, name)`, `decode_keys(input)`, `key_text(key)`, `parse_keymap(platform, value)`, `resolve(platform, multiline, value…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:binds(key)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:prefix(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
-| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`, `reply.op`; `event:value()`, `:checked()`, `:fields()`, `:mods()`, `:link()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.cell_css`, `caps.features` and the other fields; `caps:has(feature)`, `:light()` |
+| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`, `reply.op`; `event:value()`, `:checked()`, `:fields()`, `:mods()`, `:button()`, `:c()`, `:r()`, `:link()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.cell_css`, `caps.features` and the other fields; `caps:has(feature)`, `:light()` |
 
 Where Lua differs:
 
@@ -244,6 +244,11 @@ What a caller changes (SDK.md Appendix C):
 - **A submit's `ev:fields()`** is a list of `{ name, value }` pairs, in
   order, not a table by name.
 - **A drag's `keys`** are `ev:mods()`, bits; clicks and presses carry them.
+- **A secondary press** (hotty 0.7, SPEC §9) is a `press` from an element with
+  `secondary` in its `data-on`: `ev:button()` is 2 and `ev:c()`, `ev:r()` are
+  the pointer's cell (they may be negative); a primary press reads `button()`
+  0, and `c()` and `r()` nil. A handler meaning the primary button checks
+  `ev:button() == 0`.
 - **`hotty.menu(level)` is `hotty.menu(tree)`** with `name` and nested
   `items` in place of `seq`, `group` and the level a key reaches; send the
   tree when what the program can do changes, `menu_show(keys)` for each
