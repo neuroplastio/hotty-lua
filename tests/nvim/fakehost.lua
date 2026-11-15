@@ -7,7 +7,7 @@
 --     ESC 7 / ESC 8, so it knows where each placement lands, and an erase in
 --     display (ED 2 or 3) drops every placement, as hottyterm does;
 --   - the host (when native): the query, answered in the highest version it
---     shares with the query (versions, "0.7" and "0.6"; version names one) or
+--     shares with the query (versions, "0.8" and "0.7"; version names one) or
 --     with EVERSION, and every command, kept as
 --     surfaces and placements, with replies as SPEC §3.6 has them. It lays
 --     nothing out: r=auto gets auto_rows;
@@ -45,7 +45,7 @@ function M.new(opts)
 	return setmetatable({
 		native = opts.native ~= false,
 		-- the versions it speaks, highest first; the session's is the one it answered
-		versions = opts.version and { opts.version } or opts.versions or { "0.7", "0.6" },
+		versions = opts.version and { opts.version } or opts.versions or { "0.8", "0.7" },
 		session = nil,
 		caps = opts.caps,
 		auto_rows = opts.auto_rows or 4,
@@ -122,8 +122,7 @@ end
 -- version the query shares with it, which is the session's from then on, and
 -- EVERSION, the versions it speaks (highest first, comma-separated) as its
 -- detail, when it shares none; an error unless q is 2, an ok only when q is 0.
--- In a 0.6 session there is no secondary press (SPEC §15): this host reports
--- no cells and keeps none, so it has nothing to do with Alt.
+-- It lays nothing out, in either version of a session (SDK.md §4.4).
 function Host:query_reply(c)
 	local q = tonumber(c.q or "0") or 0
 	local version = shared(c.v, self.versions)
@@ -298,6 +297,9 @@ function Host:terminal(data)
 				self.cursor = { x = (tonumber(x) or 1) - 1, y = (tonumber(y) or 1) - 1 }
 			end
 			i = j + #csi + 3
+		elseif rest:sub(1, 2) == "\27c" then
+			self:forget()
+			i = j + 2
 		elseif rest:match("^\27[78]") then
 			if rest:sub(2, 2) == "7" then
 				self.saved = { x = self.cursor.x, y = self.cursor.y }
@@ -370,6 +372,7 @@ end
 --- The host forgets every surface, as a full reset does.
 function Host:forget()
 	self.docs, self.placements, self.flags = {}, {}, {}
+	self.session, self.held, self.held_query = nil, nil, nil
 end
 
 --- The commands logged, of action a (and surface s).

@@ -5,20 +5,21 @@ HTML over the TTY. With it, a Lua program shows small HTML documents, called
 surfaces, on rectangles of cells, and hears what the user does in them. It
 is written for two places: Neovim plugins, and plx scripts.
 
-It speaks hotty 0.7 and 0.6 (`hotty.VERSIONS`, SPEC §4, §15): a host of
-either is a host to it, and `caps.v` says which one it met. A 0.6 host sends
-no secondary press (SDK.md §4.7), so a program that wants one checks
-`caps.v`. A host's replies and events carry msgpack bodies
+It speaks hotty 0.8 and 0.7 (`hotty.VERSIONS`, SPEC §4, §15): a host of
+either is a host to it, and `caps.v` says which one it met. A 0.7 host has
+no `scroll` op or `hit` query, so a program that sends either checks
+`caps.v` (SDK.md §3.8). A host's replies and events carry msgpack bodies
 (SPEC §3.3), a delta is one list of ops (SPEC §6.1), keys are named as
 myelin key names 0.1 names them (SPEC §10.4), and its query lists the
-versions it speaks, lowest first (`a=q:n=1:v=0.6,0.7`, SPEC §4). A terminal
-of no version it lists, a 0.5 one included, is no host to it, and the program draws in
-cells. [Upgrading from 0.5](#upgrading-from-05),
+versions it speaks, lowest first (`a=q:n=1:v=0.7,0.8`, SPEC §4). A terminal
+of no version it lists, a 0.6 one included, is no host to it, and the
+program draws in cells. [Upgrading from 0.7](#upgrading-from-07),
+[from 0.6](#upgrading-from-06), [from 0.5](#upgrading-from-05),
 [from 0.4](#upgrading-from-04), [from 0.3](#upgrading-from-03) and
 [from 0.2](#upgrading-from-02) list what callers change.
 
-0.7.x speaks hotty 0.7, and 0.6 too; the patch number is this repository's own. It is
-on luarocks.org as `hotty` (0.7.0 is not published yet), for Lua 5.1 and
+0.8.x speaks hotty 0.8, and 0.7 too; the patch number is this repository's own. It is
+on luarocks.org as `hotty` (0.8.0 is not published yet), for Lua 5.1 and
 LuaJIT:
 
 ```
@@ -26,9 +27,9 @@ luarocks install hotty
 ```
 
 `luarocks make` builds a checkout, from its rockspec
-(`hotty-0.7.0-1.rockspec`).
+(`hotty-0.8.0-1.rockspec`).
 
-It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/v0.7.0/SDK.md)
+It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/hotty-0.8/SDK.md)
 in two layers:
 
 - `require("hotty")` is the **wire layer** (SDK.md §3): it builds commands,
@@ -73,8 +74,8 @@ an error.
 | constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`, `VERSIONS`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `MOD_SHIFT`, `MOD_ALT`, `MOD_CTRL`, `MOD_SUPER`, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
-| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `set_field`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `touch`, `sync` |
-| ops (§3.4.3) | `morph`, `inner`, `replace`, `append`, `prepend`, `before`, `after`, `remove`, `attr`, `unattr`, `text`, `var`, `reveal_op`: each returns an op, a table with `op`, `target`, `key` and `value`; `delta(surface, ops, opts)` sends a list of them as one delta |
+| commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `scroll`, `hit`, `set_field`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `touch`, `sync` |
+| ops (§3.4.3) | `morph`, `inner`, `replace`, `append`, `prepend`, `before`, `after`, `remove`, `attr`, `unattr`, `text`, `var`, `reveal_op`, `scroll_op`: each returns an op, a table with `op`, `target`, `key` and `value`; `delta(surface, ops, opts)` sends a list of them as one delta |
 | reply options (§3.4.2) | the last argument: `{ n = 4, q = 2 }`; `doc` also takes `detached = true` and `scroll = hotty.SCROLL_VERTICAL`. `q` goes out only where the wire does not imply it |
 | Placement (§3.4.1) | a table: `cols`, `rows`, `window = { x, y, w, h }`, `z`, `press`, `fit`, `hover` (`true` is on, `false` is off, `nil` sends nothing: they belong to the surface), `keep_cursor`, `backdrop` (`true` sends `b=1`, after `z`: under the cells, on a host whose features list `backdrop`; it belongs to the placement, as `z` does) |
 | a host or a relay | `delta_of(msg)` (the ops, or `nil` and an EINVAL error with `op` the index at fault), `menu_of(msg)`, `menu_show_of(msg)`, `menu_level_of(tree, platform, seq)`, `menu_find(tree, name)`, `read_key(platform, name)` |
@@ -83,7 +84,7 @@ an error.
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.speaks(v)`, `hotty.query_versions()`, `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
 | keys (§3.10) | `parse_key(name)`, `read_key(platform, name)`, `decode_keys(input)`, `key_text(key)`, `parse_keymap(platform, value)`, `resolve(platform, multiline, value…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:binds(key)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:prefix(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
-| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`, `reply.op`; `event:value()`, `:checked()`, `:fields()`, `:mods()`, `:button()`, `:c()`, `:r()`, `:link()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.cell_css`, `caps.features` and the other fields; `caps:has(feature)`, `:light()` |
+| messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`, `reply.op`, `reply.hit`; `event:value()`, `:checked()`, `:fields()`, `:mods()`, `:button()`, `:c()`, `:r()`, `:link()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.cell_css`, `caps.features` and the other fields; `caps:has(feature)`, `:light()` |
 
 Where Lua differs:
 
@@ -101,7 +102,8 @@ Where Lua differs:
   none. `reply.op` and an error's `op` are the index of the op at fault as the
   wire has it, from 0, `nil` when there is none.
 - **Op builders** take the names SDK.md's Appendix A gives Lua: `hotty.text`,
-  `hotty.attr`, `hotty.var` and the rest, and `reveal_op` for `RevealOp`.
+  `hotty.attr`, `hotty.var` and the rest, `reveal_op` for `RevealOp`, and
+  `scroll_op` for `ScrollOp`.
   An op is a plain table, `{ op = "text", target = "n", value = "1" }`; its
   `value` is `nil` for an op that takes none.
 - **A menu** is a table, `{ label, items = { { key, label, name, enabled,
@@ -160,6 +162,28 @@ Where Lua differs:
   and the body does not decode. An int further than 2^53 − 1 from 0 does
   not decode either. [`docs/plx.md`](docs/plx.md) has the contract.
 
+## Upgrading from 0.7
+
+- **`VERSION` is `"0.8"`, and `VERSIONS` lists `{ "0.7", "0.8" }`**, lowest
+  first, as SDK.md §3.1 lists them. The query asks `v=0.7,0.8`; check
+  `caps.v` before sending `scroll` or `hit`, which a 0.7 host refuses.
+- **`scroll(surface, target, action, opts)`** sends one host step of a
+  scroll action (SPEC §6.1), from the target outward, or the root for an
+  empty target. `scroll_op` builds one op; send several in a single
+  `delta` for a count. Both sessions have `surface:scroll` too.
+- **`hit(surface, c, r, opts)`** asks what a cell holds (SPEC §9.7).
+  Coordinates may be negative. It implies `q=0` even without `n`.
+  An ok reply's `hit` is `{ t, tx, ty }`: `t` is empty for none and the
+  steps are nil where absent. Other replies, and malformed bodies, have
+  no `hit` table.
+- **`tab=program` holds in fields**, on keymaps from `resolve`.
+  `keymap:program("tab")` says whether it reaches the program; outside
+  a field Tab still moves focus. Parsing keeps `tab=program` and
+  `tab=default` so formatting writes them back.
+- **`default` gives a key back**: in a resolved field keymap, `lookup`
+  answers from the platform defaults, or `insert`; outside a field it
+  is none of `program`, `prefix` or `scroll`.
+
 ## Upgrading from 0.6
 
 - **`VERSION` is `"0.7"`, and `VERSIONS` lists `{ "0.7", "0.6" }`**, highest
@@ -187,7 +211,7 @@ move together:
 - **Enter commits a text field, in a form or not.** Enter in an `input` the
   user changed sends `change`, and in a form `change` then `submit`. A
   program that read a lone field only on `blur` hears it on Enter too.
-- **The version is `"0.7"`, and 0.6 too**: a 0.5 host is no host.
+- **The version is `"0.8"`, and 0.7 too**: a 0.6 host is no host.
 
 ## Upgrading from 0.4
 
@@ -202,7 +226,7 @@ move together:
   `input`, and do not resend with the `rev` the detail names.
 - **`caret`** (`EVENT_CARET`) is a new event kind, and `input` carries `sel`
   for a field with `data-on~=caret`.
-- **The version is `"0.7"`, and 0.6 too**: a 0.5 host is no host.
+- **The version is `"0.8"`, and 0.7 too**: a 0.6 host is no host.
 
 ## Upgrading from 0.3
 
@@ -227,7 +251,7 @@ menus, and its tests' fake hosts move together:
   it types (`ctrl+key_w`, `ctrl+w`).
 - **`MOD_CONTROL` and `MOD_META`** are `MOD_CTRL` and `MOD_SUPER`, with the
   same bits.
-- **The version is `"0.7"`, and 0.6 too**: a 0.5 host is no host.
+- **The version is `"0.8"`, and 0.7 too**: a 0.6 host is no host.
 
 ## Upgrading from 0.2
 

@@ -29,8 +29,8 @@ M.NUMBER = "7279" -- the OSC number
 M.CHUNK = 4096 -- the most base64 bytes in one sequence
 M.MAX_SIZE = 1000 -- the most columns or rows of a surface
 M.MAX_NAME = 64 -- the longest surface name
-M.VERSION = "0.7" -- the protocol version this SDK speaks first, the highest of VERSIONS (SPEC §4)
-M.VERSIONS = { "0.7", "0.6" } -- every version it speaks, highest first (SPEC §15); its query lists them lowest first
+M.VERSION = "0.8" -- the newest protocol version this SDK speaks (SPEC §4)
+M.VERSIONS = { "0.7", "0.8" } -- every version it speaks, lowest first, as its query lists them (SPEC §15)
 M.COMPRESS_FROM = 256 -- the smallest payload a program may compress
 M.SCAN_MAX = 65536 -- the longest hotty sequence a Scanner takes
 
@@ -335,10 +335,10 @@ local function command(pairs_, payload, default_q, opts)
 	return M.encode(pairs_, payload, opts)
 end
 
---- The versions the query lists, lowest first, comma-separated ("0.6,0.7").
+--- The versions the query lists, lowest first, comma-separated ("0.7,0.8").
 function M.query_versions()
 	local list = {}
-	for i = #M.VERSIONS, 1, -1 do
+	for i = 1, #M.VERSIONS do
 		list[#list + 1] = M.VERSIONS[i]
 	end
 	return table.concat(list, ",")

@@ -192,7 +192,7 @@ test("a host: detected native, with its capabilities", function(spawn)
 		return t.lua("return T.mode") == "native"
 	end, "native")
 	eq(t.lua("return T.host"), "fake")
-	eq(t.lua("return T.term.caps.v"), "0.7")
+	eq(t.lua("return T.term.caps.v"), "0.8")
 	eq(t.host.queries, 1)
 	eq(t.host.problems, {})
 	return t
@@ -232,7 +232,7 @@ test(
 		wait(function()
 			return t.host.placements["t-card"] ~= nil
 		end, "the card's placement")
-		eq(t.lua("return T.term.caps.v"), "0.7")
+		eq(t.lua("return T.term.caps.v"), "0.8")
 		eq(t.host.queries, 1)
 		eq(t.host.problems, {})
 		return t
@@ -349,9 +349,9 @@ test("the fake host answers a query as the conformance vectors' hosts do", funct
 	f:close()
 	local ran = 0
 	for _, v in ipairs(data.vectors) do
-		-- This fake host speaks 0.6 as well (SDK.md §4.4), so it runs what a host
+		-- This fake host speaks 0.7 as well (SDK.md §4.4), so it runs what a host
 		-- that does is asked.
-		local queries = v.requires == nil or (#v.requires == 1 and v.requires[1] == "speaks-0.6")
+		local queries = v.requires == nil or (#v.requires == 1 and v.requires[1] == "speaks-0.7")
 		for _, st in ipairs(v.steps) do
 			queries = queries and st.send ~= nil and st.send.a == "q" and st.payload == nil
 		end
@@ -398,14 +398,18 @@ test("the fake host answers a query as the conformance vectors' hosts do", funct
 	eq(ran, 6, "query vectors run")
 end)
 
-test("the fake host answers hit errors and no element without layout", function()
+test("the fake host checks scroll, reveal and hit without layout", function()
 	local hotty = require("hotty")
 	local f = assert(io.open(root .. "/tests/vectors.json", "rb"))
 	local data = vim.json.decode(f:read("*a"))
 	f:close()
 	local ran = 0
 	for _, v in ipairs(data.vectors) do
-		if v.name:find("hit is answered", 1, true) then
+		if
+			v.name:find("hit is answered", 1, true)
+			or v.name:find("^scroll: a missing target")
+			or v.name:find("^reveal: a missing target")
+		then
 			ran = ran + 1
 			local host = fakehost.new()
 			for i, st in ipairs(v.steps) do
@@ -413,7 +417,8 @@ test("the fake host answers hit errors and no element without layout", function(
 				for k, value in pairs(st.send) do
 					ctl[#ctl + 1] = { k, value }
 				end
-				local out = host:feed(hotty.encode(ctl, st.payload))
+				local payload = st.body and require("msgpack_writer").pack(st.body) or st.payload
+				local out = host:feed(hotty.encode(ctl, payload))
 				local what = v.name .. ", step " .. i
 				if st.reply == vim.NIL then
 					eq(out, "", what)
@@ -429,8 +434,8 @@ test("the fake host answers hit errors and no element without layout", function(
 							for key, field in pairs(value) do
 								eq(body[key], field ~= vim.NIL and field or nil, what .. ": body." .. key)
 							end
-						elseif k == "code" then
-							eq(r.code, value, what)
+						elseif k == "code" or k == "detail" then
+							eq(r[k], value, what)
 						else
 							eq(m.control[k], value, what .. ": " .. k)
 						end
@@ -439,7 +444,7 @@ test("the fake host answers hit errors and no element without layout", function(
 			end
 		end
 	end
-	eq(ran, 1, "hit validation vector run")
+	eq(ran, 3, "scroll, reveal and hit validation vectors run")
 end)
 
 test("the host answers in the highest version a query shares, EVERSION when none", function()
@@ -458,14 +463,37 @@ test("the host answers in the highest version a query shares, EVERSION when none
 		return r.code .. " " .. r.detail
 	end
 	local host = fakehost.new()
-	eq(answer(host, "0.6,0.7"), "0.7")
-	eq(host.session, "0.7")
-	eq(answer(host, "0.6"), "0.6")
-	eq(host.session, "0.6", "a 0.6 session: no secondary press, Alt the terminal's")
+	eq(answer(host, "0.7,0.8"), "0.8")
+	eq(host.session, "0.8")
 	eq(answer(host, "0.7"), "0.7")
-	eq(answer(host, "0.5"), "EVERSION 0.7,0.6")
-	eq(answer(fakehost.new({ version = "0.7" }), "0.6"), "EVERSION 0.7")
-	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.6,0.7\27\\\27[c")
+	eq(host.session, "0.7", "the negotiated 0.7 session")
+	eq(answer(host, "0.8"), "0.8")
+	eq(answer(host, "0.5"), "EVERSION 0.8,0.7")
+	eq(answer(fakehost.new({ version = "0.8" }), "0.7"), "EVERSION 0.8")
+	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.7,0.8\27\\\27[c")
+end)
+
+test("a full reset ends the fake host session, including a split ESC c", function()
+	local hotty = require("hotty")
+	for _, split in ipairs({ false, true }) do
+		local host = fakehost.new()
+		host:feed(hotty.query())
+		host:feed(hotty.doc("old", "<p>old</p>", { q = 2 }))
+		host:feed(hotty.place("old", { cols = 10, rows = 1 }, { q = 2 }))
+		eq(host.session, "0.8")
+		if split then
+			host:feed("\27")
+			host:feed("c")
+		else
+			host:feed("\27c")
+		end
+		eq(host.session, nil)
+		eq(host.docs, {})
+		eq(host.placements, {})
+		eq(host.flags, {})
+		host:feed(hotty.query())
+		eq(host.session, "0.8")
+	end
 end)
 
 -- Placement -------------------------------------------------------------------
