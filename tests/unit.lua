@@ -614,6 +614,24 @@ test("reveal: where in the value, none for the nearest; features say what a host
 	eq(c.cell, nil, "cell is gone")
 end)
 
+test("scroll: the root, steps in one delta, and invalid actions", function()
+	local ops, m = ops_of(hotty.scroll("x", "", "scroll-down"))
+	eq(ops[1].t, nil)
+	eq(ops[1].v, "scroll-down")
+	ok(hotty.delta_of(m))
+	local list = { hotty.scroll_op("box", "scroll-end"), hotty.scroll_op("box", "scroll-end") }
+	local _, repeated = ops_of(hotty.delta("x", list))
+	eq(#assert(hotty.delta_of(repeated)), 2)
+	for _, action in ipairs({ "", "end", "program" }) do
+		local sent, msg = ops_of(hotty.scroll("x", "", action))
+		eq(sent[1].v, action, "even an empty value goes out")
+		local got, err = hotty.delta_of(msg)
+		eq(got, nil)
+		eq(err.code, hotty.EINVAL)
+		eq(err.op, 0)
+	end
+end)
+
 test("delta: ops in order, each map's keys in order, the smallest header of each", function()
 	local cmd = hotty.delta("x", {
 		hotty.text("a", "hi"),

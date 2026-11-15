@@ -226,6 +226,8 @@ local function build(b)
 		return hotty.morph_to(a.surface, a.target, a.html, opts)
 	elseif name == "reveal" then
 		return hotty.reveal(a.surface, a.target, a.where, opts)
+	elseif name == "scroll" then
+		return hotty.scroll(a.surface, a.target or "", a.action, opts)
 	elseif name == "res" then
 		return hotty.res(a.id, a.mime, a.data, opts)
 	elseif name == "del_res" then

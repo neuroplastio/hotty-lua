@@ -647,6 +647,11 @@ function Surface:reveal(target, where, opts)
 	return self:send(hotty.reveal(self.id, target, where, opts))
 end
 
+--- Scrolls by one host step of action, from target outward (empty: root).
+function Surface:scroll(target, action, opts)
+	return self:send(hotty.scroll(self.id, target, action, opts))
+end
+
 --- Changes a control unless the user has since change.rev (SPEC §6.4);
 --- change is hotty.set_field's FieldChange. Replies on error: ESTALE is heard.
 function Surface:set_field(target, change, opts)

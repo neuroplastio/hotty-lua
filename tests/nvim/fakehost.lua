@@ -203,10 +203,34 @@ function Host:command(m)
 			return self:answer(m, "ENOENT")
 		end
 		if c.a == "delta" then
-			local _, err = hotty.delta_of(m)
+			local ops, err = hotty.delta_of(m)
 			if err then
 				self.problems[#self.problems + 1] = "a delta the host refuses: " .. err.detail
 				return self:answer(m, "EINVAL", err.op and { { "i", tostring(err.op) } } or nil, err.detail)
+			end
+			-- This small host has no DOM or layout. Find ids in the documents
+			-- its tests send; scroll and reveal move nothing.
+			local ids = {}
+			for attrs in self.docs[s].html:gmatch("<[%w]+([^>]*)>") do
+				for id in attrs:gmatch('%s+id="([^"]*)"') do
+					ids[id] = true
+				end
+				for id in attrs:gmatch("%s+id='([^']*)'") do
+					ids[id] = true
+				end
+				for id in attrs:gmatch([[%s+id=([^%s"'>]+)]]) do
+					ids[id] = true
+				end
+			end
+			for i, op in ipairs(ops) do
+				if
+					(op.op == "scroll" or op.op == "reveal")
+					and op.target
+					and op.target ~= ""
+					and not ids[op.target]
+				then
+					return self:answer(m, "ENOTARGET", { { "i", tostring(i - 1) } }, op.target)
+				end
 			end
 		end
 		if c.a == "hide" then

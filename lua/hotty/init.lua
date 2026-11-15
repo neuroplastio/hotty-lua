@@ -96,6 +96,7 @@ M.OP_UNATTR = "unattr"
 M.OP_TEXT = "text"
 M.OP_VAR = "var"
 M.OP_REVEAL = "reveal"
+M.OP_SCROLL = "scroll"
 M.OPS = {
 	"morph",
 	"inner",
@@ -110,6 +111,7 @@ M.OPS = {
 	"text",
 	"var",
 	"reveal",
+	"scroll",
 }
 
 -- The optional features a host may have (SPEC §4), as its capabilities list
@@ -609,6 +611,12 @@ function M.reveal_op(target, where)
 	return valued("reveal", target, nil, where)
 end
 
+--- Scrolls by one host step of a scroll action, from target outward, or
+--- from the root when target is empty (SPEC §6.1).
+function M.scroll_op(target, action)
+	return valued("scroll", target, nil, action)
+end
+
 -- One op as the msgpack map SDK.md §3.4.3 gives it: op, t unless the target
 -- is empty, k when there is a key, v when there is a value.
 local function mp_op(o)
@@ -671,6 +679,11 @@ end
 --- "start" or "end", or nil (or "") for as little as brings it into view.
 function M.reveal(surface, target, where, opts)
 	return M.delta(surface, { M.reveal_op(target, where) }, opts)
+end
+
+--- Scrolls as a key bound to action would: a delta of one scroll op.
+function M.scroll(surface, target, action, opts)
+	return M.delta(surface, { M.scroll_op(target, action) }, opts)
 end
 
 --- Sends a resource that documents refer to as cid:<id> (SPEC §7.1).
@@ -1474,7 +1487,7 @@ end
 --- is one) when the body does not decode (SPEC §3.3) or has no ops, an op is
 --- not a map, holds op, t, k or v as anything but a str, or names an op
 --- there is none of, an op lacks the t or k it needs (an empty one is
---- none), or a reveal has a value other than start or end. A value an op
+--- none), or reveal or scroll has an invalid value. A value an op
 --- does not take is ignored, and so is a key this SDK does not know.
 function M.delta_of(m)
 	if m.control.a ~= "delta" then
@@ -1515,10 +1528,12 @@ function M.delta_of(m)
 		local name = o.op or ""
 		if not OP_NAMES[name] then
 			return nil, invalid(m, "unknown op " .. name, i - 1)
-		elseif (o.target == nil or o.target == "") and name ~= "morph" then
+		elseif (o.target == nil or o.target == "") and name ~= "morph" and name ~= "scroll" then
 			return nil, invalid(m, "missing t", i - 1)
 		elseif (o.key == nil or o.key == "") and (name == "attr" or name == "unattr" or name == "var") then
 			return nil, invalid(m, "missing k", i - 1)
+		elseif name == "scroll" and not M.SCROLL_ACTIONS[o.value] then
+			return nil, invalid(m, "scroll " .. (o.value or ""), i - 1)
 		elseif name == "reveal" and o.value ~= nil and o.value ~= "start" and o.value ~= "end" then
 			return nil, invalid(m, "reveal " .. o.value, i - 1)
 		end
