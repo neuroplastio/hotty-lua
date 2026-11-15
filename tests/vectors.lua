@@ -242,6 +242,8 @@ local function build(b)
 		return hotty.focus(a.surface, a.target, opts)
 	elseif name == "blur" then
 		return hotty.blur(a.surface, opts)
+	elseif name == "hit" then
+		return hotty.hit(a.surface, a.c, a.r, opts)
 	elseif name == "edit" then
 		return hotty.edit(a.names, opts)
 	elseif name == "menu" then
@@ -358,6 +360,7 @@ local function reply_view(r)
 		code = r.code,
 		detail = r.detail,
 		op = r.op,
+		hit = r.hit,
 	}
 end
 

@@ -515,6 +515,29 @@ test("messages: the body, decoded once, or nil and why", function()
 	eq(m:body(), nil, "none")
 end)
 
+test("hit: reply fields are typed, optional and only on an ok hit", function()
+	local function reply(action, re, body)
+		local _, m = hotty.decoder():feed(hotty.encode({ { "a", action }, { "re", re } }, body))
+		return m:reply()
+	end
+	local hit = reply("ok", "hit", mp.pack({ t = "row", tx = 0, ty = -1 })).hit
+	eq(hit.t, "row")
+	eq(hit.tx, 0)
+	eq(hit.ty, -1)
+	hit = reply("ok", "hit", mp.pack({})).hit
+	eq(hit.t, "")
+	eq(hit.tx, nil)
+	eq(hit.ty, nil)
+	for _, body in ipairs({ "", "bad", mp.pack({ t = 1 }), mp.pack({ tx = mp.float(1) }), mp.pack({ ty = "0" }) }) do
+		eq(reply("ok", "hit", body).hit, nil)
+	end
+	eq(reply("err", "hit", mp.pack({ t = "row" })).hit, nil)
+	eq(reply("ok", "q", mp.pack({ t = "row" })).hit, nil)
+	local _, msg = hotty.decoder():feed(hotty.hit("x", -1, -2, { n = 4, q = 0 }))
+	eq(msg.control.q, nil)
+	eq(msg.control.n, "4")
+end)
+
 test("press: a secondary press's button and cell (SPEC §9)", function()
 	local e = ev("press", mp.pack({ button = 2, c = 5, r = -1, mods = 1, area = { c = 0, r = 1, w = 2, h = 3 } }))
 	eq(e:button(), 2)

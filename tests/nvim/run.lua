@@ -398,6 +398,50 @@ test("the fake host answers a query as the conformance vectors' hosts do", funct
 	eq(ran, 6, "query vectors run")
 end)
 
+test("the fake host answers hit errors and no element without layout", function()
+	local hotty = require("hotty")
+	local f = assert(io.open(root .. "/tests/vectors.json", "rb"))
+	local data = vim.json.decode(f:read("*a"))
+	f:close()
+	local ran = 0
+	for _, v in ipairs(data.vectors) do
+		if v.name:find("hit is answered", 1, true) then
+			ran = ran + 1
+			local host = fakehost.new()
+			for i, st in ipairs(v.steps) do
+				local ctl = {}
+				for k, value in pairs(st.send) do
+					ctl[#ctl + 1] = { k, value }
+				end
+				local out = host:feed(hotty.encode(ctl, st.payload))
+				local what = v.name .. ", step " .. i
+				if st.reply == vim.NIL then
+					eq(out, "", what)
+				elseif st.reply then
+					local segs = hotty.scanner():feed(out)
+					eq(#segs, 1, what .. ": one reply, no events")
+					local result, m = hotty.decoder():feed(segs[1].data)
+					eq(result, hotty.COMPLETE, what)
+					local r = m:reply()
+					for k, value in pairs(st.reply) do
+						if k == "body" then
+							local body = assert(m:body())
+							for key, field in pairs(value) do
+								eq(body[key], field ~= vim.NIL and field or nil, what .. ": body." .. key)
+							end
+						elseif k == "code" then
+							eq(r.code, value, what)
+						else
+							eq(m.control[k], value, what .. ": " .. k)
+						end
+					end
+				end
+			end
+		end
+	end
+	eq(ran, 1, "hit validation vector run")
+end)
+
 test("the host answers in the highest version a query shares, EVERSION when none", function()
 	local hotty = require("hotty")
 	local function answer(host, v)

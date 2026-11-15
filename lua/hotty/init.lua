@@ -728,6 +728,21 @@ function M.blur(surface, opts)
 	return command({ { "a", "blur" }, { "s", surface } }, nil, M.NO_REPLY, opts)
 end
 
+--- Asks which element is at cell (c, r) of the surface (SPEC §9.7).
+--- Negative cells are above or left of it. A query implies q=0, with or
+--- without n; only another explicit q is sent.
+function M.hit(surface, c, r, opts)
+	local p = { { "a", "hit" }, { "s", surface }, { "c", int(c) }, { "r", int(r) } }
+	opts = opts or {}
+	if opts.n ~= nil then
+		p[#p + 1] = { "n", int(opts.n) }
+	end
+	if opts.q ~= nil and opts.q ~= M.REPLY_ALWAYS then
+		p[#p + 1] = { "q", int(opts.q) }
+	end
+	return M.encode(p)
+end
+
 --- Takes the edit commands named (SPEC §10.6), a list of "select-all",
 --- "copy", "cut", "paste", "undo", "redo": their keys, the host's edit
 --- shortcuts (caps.edit), then reach the program as command events in place
@@ -936,6 +951,7 @@ end
 local AREA = { c = "int", r = "int", w = "int", h = "int" }
 local DRAG = { c = "int", r = "int", mods = "int", x = "int", y = "int", tx = "int", ty = "int" }
 local ERROR = { code = "str", detail = "str" }
+local HIT = { t = "str", tx = "int", ty = "int" }
 local CAPS = {
 	v = "str",
 	cellcss = { w = "float", h = "float" },
@@ -1101,6 +1117,12 @@ function Message:reply()
 	}, Reply)
 	if r.op and r.op < 0 then
 		r.op = nil
+	end
+	if r.ok and r.re == "hit" then
+		local body = typed_message(self, HIT)
+		if body then
+			r.hit = { t = body.t or "", tx = body.tx, ty = body.ty }
+		end
 	end
 	if not r.ok then
 		local body = typed_message(self, ERROR)

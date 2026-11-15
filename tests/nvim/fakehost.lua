@@ -73,12 +73,12 @@ end
 -- The quiet level of a command (SPEC §3.5): its q, else 0 with n and 1
 -- without.
 local function quiet(c)
-	return tonumber(c.q or (c.n and "0" or "1")) or 1
+	return tonumber(c.q or ((c.n or c.a == "q" or c.a == "hit") and "0" or "1")) or 1
 end
 
 -- Answers a command as SPEC §3.6 has hosts do: an error unless q is 2, an ok
 -- only when q is 0.
-function Host:answer(m, err, extra, detail)
+function Host:answer(m, err, extra, detail, body)
 	local q = quiet(m.control)
 	local ctl = { { "a", err and "err" or "ok" } }
 	if m.control.n then
@@ -100,7 +100,7 @@ function Host:answer(m, err, extra, detail)
 	if q ~= 0 then
 		return ""
 	end
-	return reply(ctl)
+	return reply(ctl, body)
 end
 
 -- The highest of versions that v, the versions a query lists, comma-separated,
@@ -198,6 +198,20 @@ function Host:command(m)
 		end
 		self.placements[s] = p
 		return self:answer(m, nil, { { "c", tostring(cols) }, { "r", tostring(rows) } })
+	elseif c.a == "hit" then
+		if not self.docs[s] then
+			return self:answer(m, "ENOENT")
+		end
+		for _, key in ipairs({ "c", "r" }) do
+			if not c[key] or not c[key]:match("^%-?%d+$") then
+				return self:answer(m, "EINVAL")
+			end
+		end
+		if self.docs[s].detached then
+			return self:answer(m, "EDETACHED")
+		end
+		-- No layout: every cell holds no element, even on a placed surface.
+		return self:answer(m, nil, nil, nil, mp.pack({}))
 	elseif c.a == "hide" or c.a == "delta" or c.a == "detach" or c.a == "focus" or c.a == "blur" then
 		if not self.docs[s] then
 			return self:answer(m, "ENOENT")
