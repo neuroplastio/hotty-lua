@@ -51,6 +51,7 @@ M.ACTIONS = {
 	"paste",
 	"undo",
 	"redo",
+	"default",
 	"scroll-up",
 	"scroll-down",
 	"scroll-left",
@@ -1018,6 +1019,9 @@ local FOCUS = { tab = true, ["shift+tab"] = true, escape = true }
 -- The action bound to a canonical key, or, for a key with shift that is
 -- not a character and is not bound, to the key without shift.
 function Keymap:bound(k)
+	if k == "shift+tab" or k == "escape" then
+		return nil
+	end
 	local a = self.actions[k]
 	if not a then
 		local mods, value, kind = split(k)
@@ -1047,6 +1051,12 @@ function Keymap:lookup(key)
 		return nil
 	end
 	local a = self:bound(k)
+	if a == "default" then
+		if self.base then
+			return self.base:lookup(k)
+		end
+		return M.key_text(k) ~= nil and M.INSERT or nil
+	end
 	if a then
 		if a == "program" or a == "prefix" or (M.MULTILINE_ACTIONS[a] and not self.multiline) then
 			return nil
@@ -1076,9 +1086,12 @@ end
 --- keymap, parse_keymap of its data-keys values joined with a space, the
 --- root's first, with no default keymap; a key it gives reaches the program
 --- before the element or a scroll uses it (SPEC §10.2, keys for the
---- program).
+--- program). Tab is given only by a field keymap, from resolve.
 function Keymap:program(key)
 	local k = M.parse_key(key)
+	if k == "tab" and not self.field then
+		return false
+	end
 	local a = k and self:bound(k)
 	return a == "program" or a == "prefix"
 end
@@ -1115,7 +1128,11 @@ local function each_binding(platform, value, fn)
 		if i then
 			local text, action = sub(b, 1, i - 1), sub(b, i + 1)
 			local key = read(text, mod, false)
-			if key and ACTION[action] and not FOCUS[key] then
+			if
+				key
+				and ACTION[action]
+				and (not FOCUS[key] or (key == "tab" and (action == "program" or action == "default")))
+			then
 				fn(key, action, read(text, mod, true))
 			end
 		end
@@ -1123,7 +1140,8 @@ local function each_binding(platform, value, fn)
 end
 
 --- A data-keys value's bindings, without those a host ignores, each key
---- read on the platform ({mod, edit}, or nil for ctrl).
+--- read on the platform ({mod, edit}, or nil for ctrl). tab=program and
+--- tab=default are kept for fields; other focus bindings are ignored.
 function M.parse_keymap(platform, value)
 	local m = M.keymap(false, platform)
 	each_binding(platform, value, function(key, action, written)
@@ -1212,6 +1230,7 @@ local MOD_KEYS = {
 function M.resolve(platform, multiline, ...)
 	platform = platform or {}
 	local m = M.keymap(multiline, platform)
+	m.field = true
 	for _, b in ipairs(DEFAULT_KEYS) do
 		m:bind(b[1], b[2])
 	end
@@ -1228,6 +1247,8 @@ function M.resolve(platform, multiline, ...)
 			end
 		end
 	end
+	m.base = M.keymap(multiline, platform)
+	m.base:update(m)
 	local function bind(key, action, written)
 		if not M.SCROLL_ACTIONS[action] then
 			m:bind(key, action, written)

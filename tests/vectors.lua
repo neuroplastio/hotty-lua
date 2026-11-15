@@ -693,7 +693,7 @@ local function run_keys(v)
 end
 
 local function run_keymap(v)
-	if v.program ~= nil or v.prefix ~= nil or v.scroll ~= nil then
+	if v.lookup == nil and (v.program ~= nil or v.prefix ~= nil or v.scroll ~= nil) then
 		-- An element's keymap outside a text field: no default keymap.
 		local m = hotty.parse_keymap(v.platform, table.concat(v.keys, " "))
 		for key, want in pairs(v.program or {}) do
@@ -738,6 +738,12 @@ local function run_keymap(v)
 		local got = m:selects(key)
 		if got ~= want then
 			return false, show(key) .. ": selects " .. show(got) .. ", want " .. show(want)
+		end
+	end
+	for key, want in pairs(v.program or {}) do
+		local got = m:program(key)
+		if got ~= want then
+			return false, show(key) .. ": program " .. show(got) .. ", want " .. show(want)
 		end
 	end
 	for key, want in pairs(v.binds or {}) do
