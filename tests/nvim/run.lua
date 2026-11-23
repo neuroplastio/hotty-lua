@@ -549,6 +549,9 @@ test("the fake host plays context menus, auxiliary clicks and drags by element",
 			return events
 		end
 		local legacy = version == "0.8"
+		eq(pointer("down", "menu", secondary, { c = 2, r = 0, area = area, mods = hotty.MOD_SHIFT }), {})
+		eq(pointer("up", "menu", secondary), {})
+		eq(host.focused.attrs.id, "menu")
 		eq(pointer("down", "menu", secondary), {
 			{
 				e = legacy and "press" or "contextmenu",
@@ -593,6 +596,72 @@ test("the fake host plays context menus, auxiliary clicks and drags by element",
 			eq(events, { { e = "contextmenu", s = "card", t = "menu" } })
 		end
 	end
+end)
+
+test("primary drag starts before focus changes and clicks its named source on release", function()
+	local hotty = require("hotty")
+	local host = fakehost.new()
+	host:feed(hotty.query())
+	host:feed(hotty.doc(
+		"card",
+		[[
+		<input id=field>
+		<button id=drag data-on="drag click"><span id=child><i data-on=drag>Child</i></span></button>
+	]]
+	))
+	host:feed(hotty.place("card", { cols = 12, rows = 3, press = true }))
+	host:feed(hotty.focus("card", "field"))
+	eq(host:key("x"), true)
+	local function pointer(phase, target)
+		local _, events = host_messages(host:pointer("card", phase, target, 0, { c = 1, r = 1 }))
+		return events
+	end
+	eq(pointer("down", "drag"), {
+		{ e = "press", s = "card", t = "drag" },
+		{ e = "dragstart", s = "card", t = "drag", detail = { c = 1, r = 1 } },
+		{ e = "change", s = "card", t = "field", detail = { value = "x", rev = 1 } },
+		{ e = "focus", s = "card", t = "drag" },
+	})
+	local child = require("document").find(host.docs.card.tree, "child").children[1]
+	eq(pointer("up", child), {
+		{ e = "dragend", s = "card", t = "drag", detail = { c = 1, r = 1 } },
+		{ e = "click", s = "card", t = "drag", detail = {} },
+	})
+	eq(pointer("down", child), {
+		{ e = "press", s = "card", t = "child" },
+		{ e = "focus", s = "card", t = "drag" },
+	})
+end)
+
+test("primary label clicks focus and activate associated controls", function()
+	local hotty = require("hotty")
+	local host = fakehost.new()
+	host:feed(hotty.query())
+	host:feed(hotty.doc(
+		"card",
+		[[
+		<input id=field>
+		<label id=explicit for=field>Field</label>
+		<label id=implicit><span id=text>Check</span><input id=box type=checkbox></label>
+	]]
+	))
+	host:feed(hotty.place("card", { cols = 12, rows = 3, press = true }))
+	local function pointer(phase, target)
+		local _, events = host_messages(host:pointer("card", phase, target, 0, { c = 1, r = 1 }))
+		return events
+	end
+	eq(pointer("down", "explicit"), {
+		{ e = "press", s = "card", t = "explicit" },
+		{ e = "focus", s = "card", t = "field" },
+	})
+	eq(pointer("up", "explicit"), {})
+	eq(pointer("down", "text"), {
+		{ e = "press", s = "card", t = "text" },
+		{ e = "focus", s = "card", t = "box" },
+	})
+	eq(pointer("up", "text"), {
+		{ e = "change", s = "card", t = "box", detail = { checked = true, value = "on", rev = 1 } },
+	})
 end)
 
 test("focus fixup checks href, contenteditable and tabindex without CSS layout", function()

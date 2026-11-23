@@ -532,9 +532,31 @@ local function click_target(node)
 	end)
 end
 
-local function drag_source(node)
+local LABELABLE =
+	{ button = true, input = true, meter = true, output = true, progress = true, select = true, textarea = true }
+
+local function labelable(node)
+	return LABELABLE[node.tag] and (node.tag ~= "input" or (node.attrs.type or ""):lower() ~= "hidden")
+end
+
+local function primary_target(tree, node)
+	local label = doc.ancestor(node, function(n)
+		return n.tag == "label"
+	end)
+	if not label then
+		return node
+	end
+	local id = label.attrs["for"]
+	if id then
+		local control = doc.find(tree, id)
+		return control and labelable(control) and control or node
+	end
+	return doc.walk(label, labelable) or node
+end
+
+local function drag_source(node, named)
 	return doc.ancestor(node, function(n)
-		return doc.on(n, "drag")
+		return doc.on(n, "drag") and (not named or doc.id(n))
 	end)
 end
 
@@ -605,10 +627,10 @@ local function begin_pointer(host, surface, state, node, button, at)
 	end
 	local primary = button == hotty.BUTTON_PRIMARY
 	local legacy = host.session == "0.8"
-	if button == 5 or (not primary and not legacy and bit.band(mods, hotty.MOD_SHIFT) ~= 0) then
+	if button == 5 or (not primary and bit.band(mods, hotty.MOD_SHIFT) ~= 0) then
 		return ""
 	end
-	local owner
+	local owner, activation
 	if button == hotty.BUTTON_SECONDARY then
 		owner = legacy and opted(node, "secondary") or not legacy and right_target(node)
 		if owner and (legacy or not doc.on(owner, "rightbutton")) then
@@ -625,7 +647,8 @@ local function begin_pointer(host, surface, state, node, button, at)
 		if doc.ancestor(node, doc.hyperlink) then
 			return M.blur(host)
 		end
-		owner = click_target(node)
+		activation = primary_target(state.tree, node)
+		owner = click_target(activation)
 	elseif not legacy then
 		owner = aux_target(node)
 	end
@@ -658,12 +681,11 @@ local function begin_pointer(host, surface, state, node, button, at)
 		end
 		out = host:event(surface, "press", doc.id(named), next(detail) and detail or nil)
 	end
-	out = out .. focus_click(host, surface, node)
 	if drag then
 		down.moving = true
 		out = out .. host:event(surface, "dragstart", doc.id(drag), down.start)
 	end
-	return out
+	return out .. focus_click(host, surface, activation)
 end
 
 local function move_drag(host, down, target, at)
@@ -709,13 +731,14 @@ local function release_pointer(host, down, node, at)
 		return out
 	end
 	local mods = at.mods ~= 0 and at.mods or nil
-	local area = area_of(host, surface, owner, at)
 	if down.button == hotty.BUTTON_PRIMARY then
+		local activation = primary_target(host.docs[surface].tree, node)
 		if
-			(not down.moving or drag_source(node) == down.drag)
+			(not down.moving or drag_source(node, true) == down.drag)
 			and not doc.ancestor(node, doc.hyperlink)
-			and click_target(node) == owner
+			and click_target(activation) == owner
 		then
+			local area = area_of(host, surface, owner, activation == node and at or nil)
 			out = out .. activate(host, surface, owner, { area = area, mods = mods })
 		end
 	elseif not down.moving then
@@ -728,7 +751,7 @@ local function release_pointer(host, down, node, at)
 		if release == owner then
 			local id = doc.id(owner)
 			local detail = link_detail(owner, { c = at.c, r = at.r, mods = mods, button = down.button })
-			detail.area = (id or detail.href) and area or nil
+			detail.area = (id or detail.href) and area_of(host, surface, owner, at) or nil
 			out = out .. host:event(surface, "auxclick", id, detail)
 		end
 	end
