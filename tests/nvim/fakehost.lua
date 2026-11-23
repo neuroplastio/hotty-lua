@@ -166,14 +166,8 @@ function Host:cancel_pointer(surface, report)
 	end
 	self.pointer_button = nil
 	if report and down.moving then
-		local last = down.last
-		local detail = vim.tbl_extend("force", {}, last and last.detail or down.start)
-		detail.button = nil
-		local node = down.drag
-		if last then
-			node = last.node
-		end
-		return self:event(surface, "dragend", document.id(node), detail)
+		local last = down.last_cell or down.start
+		return self:event(surface, "dragend", nil, { c = last.c, r = last.r, mods = last.mods, x = last.x, y = last.y })
 	end
 	return ""
 end
@@ -257,6 +251,9 @@ function Host:command(m)
 		local ended = self:cancel_pointer(s, c.d ~= "1")
 		self.docs[s] = { html = m.payload, tree = document.parse(m.payload), detached = c.d == "1" }
 		self.flags[s] = self.flags[s] or {}
+		if c.d == "1" and self.keyboard == s then
+			self.keyboard, self.focused, self.prefix = nil, nil, nil
+		end
 		return ended .. input.fixup(self, s) .. self:answer(m)
 	elseif c.a == "place" then
 		if not self.docs[s] then
@@ -526,7 +523,7 @@ function Host:forget()
 	self.docs, self.placements, self.flags = {}, {}, {}
 	self.resources, self.touch, self.screen = {}, { main = {}, alternate = {} }, "main"
 	self.session, self.held, self.held_query = nil, nil, nil
-	self.keyboard, self.focused, self.prefix, self.pointer_button = nil, nil, nil, nil
+	self.keyboard, self.focused, self.prefix, self.pointer_button, self.held_buttons = nil, nil, nil, nil, nil
 end
 
 --- The commands logged, of action a (and surface s).

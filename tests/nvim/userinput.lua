@@ -29,9 +29,12 @@ local function selection(field)
 end
 
 function M.commit(host, node)
-	if node and node.dirty then
-		node.dirty = nil
-		return event(host, "change", node, { value = node.field.value, rev = node.rev })
+	if node and node.before_edit ~= nil then
+		local before = node.before_edit
+		node.before_edit = nil
+		if node.field.value ~= before then
+			return event(host, "change", node, { value = node.field.value, rev = node.rev })
+		end
 	end
 	return ""
 end
@@ -280,9 +283,42 @@ end
 local function link_detail(node, detail)
 	if node.tag == "a" then
 		detail.href = node.attrs.href
+		detail.url = doc.link_url(node)
 	end
 	detail.value = node.attrs.value
 	return detail
+end
+
+local function area_of(host, surface, node, at)
+	if node and host.area_of then
+		return host.area_of(surface, node)
+	end
+	return at and at.area
+end
+
+local function activate(host, surface, node, detail)
+	if (node.tag == "input" or node.tag == "button") and not doc.focusable(node) then
+		return ""
+	end
+	local kind = node.tag == "input" and node.attrs.type
+	if kind == "checkbox" or kind == "radio" then
+		local value = kind == "radio" or not checked(node)
+		if value == checked(node) then
+			return ""
+		end
+		local tree = host.docs[surface].tree
+		check_control(node, tree, value)
+		node.rev = revision(node, tree) + 1
+		return host:event(surface, "change", doc.target(node), {
+			checked = value,
+			value = node.attrs.value or "on",
+			rev = node.rev,
+		})
+	end
+	if doc.id(node) or (node.tag == "a" and node.attrs.href) then
+		return host:event(surface, "click", doc.id(node), link_detail(node, detail))
+	end
+	return ""
 end
 
 function M.key(host, name)
@@ -313,7 +349,9 @@ function M.key(host, name)
 			return doc.on(n, "contextmenu")
 		end)
 		if target then
-			return true, host:event(host.keyboard, "contextmenu", doc.id(target))
+			local id = doc.id(target)
+			local area = id and area_of(host, host.keyboard, target)
+			return true, host:event(host.keyboard, "contextmenu", id, area and { area = area } or nil)
 		end
 	end
 	local field = doc.field(current)
@@ -324,11 +362,15 @@ function M.key(host, name)
 		elseif action == "submit" then
 			return true, submit(host, current)
 		end
-		local anchor, caret = field.anchor, field.caret
+		if current.attrs.readonly and (action == hotty.INSERT or action == "newline" or action:match("^delete%-")) then
+			return true, ""
+		end
+		local anchor, caret, value = field.anchor, field.caret, field.value
 		local changed = field:key(map, key)
 		local detail = {}
 		if changed then
-			current.rev, current.dirty = current.rev + 1, true
+			current.rev = current.rev + 1
+			current.before_edit = current.before_edit or value
 		end
 		if doc.on(current, "caret") then
 			detail.sel = selection(field)
@@ -348,23 +390,7 @@ function M.key(host, name)
 		local out = pick(host, current, bare)
 		return out ~= nil, out or ""
 	elseif reader == "button" and (bare == "space" or bare == "enter") then
-		local input = current.attrs.type
-		if input == "checkbox" or input == "radio" then
-			local value = input == "radio" or not checked(current)
-			if value == checked(current) then
-				return true, ""
-			end
-			check_control(current, tree, value)
-			current.rev = revision(current, tree) + 1
-			return true,
-				event(
-					host,
-					"change",
-					current,
-					{ checked = value, value = current.attrs.value or "on", rev = current.rev }
-				)
-		end
-		return true, event(host, "click", current, link_detail(current, {}))
+		return true, activate(host, host.keyboard, current, { area = area_of(host, host.keyboard, current) })
 	end
 	return false, ""
 end
@@ -490,151 +516,255 @@ end
 
 local function right_target(node)
 	return doc.ancestor(node, function(n)
-		return doc.on(n, "rightbutton") or doc.on(n, "contextmenu")
+		return (doc.on(n, "rightbutton") or doc.on(n, "contextmenu")) and not doc.hyperlink(n)
 	end)
 end
 
--- Tests name the element and supply pointer cells (and area if needed).
--- A nil target means the pointer is outside the surface.
-function M.pointer(host, surface, phase, target, button, at)
-	local state = host.docs[surface]
-	local node = state and doc.find(state.tree, target)
-	local mods = at.mods or 0
-	if
-		phase == "down"
-		and (
-			not node
-			or state.detached
-			or not host.placements[surface]
-			or (button ~= hotty.BUTTON_PRIMARY and bit.band(mods, hotty.MOD_SHIFT) ~= 0 and host.session ~= "0.8")
-			or button == 5
-			or host.pointer_button
-		)
-	then
-		return ""
-	end
-	if phase == "down" and bit.band(mods, hotty.MOD_ALT) ~= 0 then
+local function aux_target(node)
+	return doc.ancestor(node, function(n)
+		return doc.on(n, "aux") and not doc.hyperlink(n)
+	end)
+end
+
+local function click_target(node)
+	return doc.ancestor(node, function(n)
+		return doc.on(n, "click") or doc.reader(n) == "button"
+	end)
+end
+
+local function drag_source(node)
+	return doc.ancestor(node, function(n)
+		return doc.on(n, "drag")
+	end)
+end
+
+local function drag_target(node)
+	return doc.ancestor(node, function(n)
+		return doc.id(n) and (doc.on(n, "drag") or doc.on(n, "drop"))
+	end)
+end
+
+local function focus_click(host, surface, node)
+	local focus = doc.ancestor(node, function(n)
+		return (tonumber(n.attrs.tabindex) or 0) >= 0 and doc.focusable(n)
+	end)
+	if not focus then
 		return M.blur(host)
 	end
-	local function send(kind, element, detail)
-		local id = kind == "press" and button == hotty.BUTTON_PRIMARY and doc.target(element) or doc.id(element)
-		if not id and detail and not detail.href then
+	local out
+	if host.keyboard ~= surface then
+		out = M.blur(host)
+	else
+		out = focus ~= host.focused and M.commit(host, host.focused) or ""
+	end
+	host.keyboard, host.focused, host.prefix = surface, focus, nil
+	return out .. host:event(surface, "focus", doc.target(focus))
+end
+
+local function step_counts(node)
+	local x, y = (node.attrs["data-steps"] or ""):match("^%s*(%d+)%s*(%d*)%s*$")
+	if x then
+		return tonumber(x), tonumber(y)
+	end
+end
+
+local function step_at(cell, start, size, count)
+	if count and count > 0 and cell then
+		return math.max(0, math.min(count, math.floor((cell + 0.5 - start) * count / size + 0.5)))
+	end
+end
+
+local function drag_cell(host, down, target, at)
+	local cell = { c = at.c, r = at.r, mods = at.mods ~= 0 and at.mods or nil, x = at.x, y = at.y }
+	local box = area_of(host, down.surface, down.drag)
+	if box then
+		cell.x = step_at(at.c, box.c, box.w, down.steps_x)
+		cell.y = step_at(at.r, box.r, box.h, down.steps_y)
+	end
+	if target and doc.on(target, "drop") then
+		local dest = area_of(host, down.surface, target)
+		if dest then
+			local x, y = step_counts(target)
+			cell.tx = step_at(at.c, dest.c, dest.w, x)
+			cell.ty = step_at(at.r, dest.r, dest.h, y)
+		else
+			cell.tx, cell.ty = at.tx, at.ty
+		end
+	end
+	return cell
+end
+
+local function begin_pointer(host, surface, state, node, button, at)
+	local mods = at.mods or 0
+	if bit.band(mods, hotty.MOD_ALT) ~= 0 then
+		return M.blur(host)
+	end
+	local placement = host.placements[surface]
+	if not state or state.detached or not placement or at.outside then
+		return button == hotty.BUTTON_PRIMARY and M.blur(host) or ""
+	end
+	local primary = button == hotty.BUTTON_PRIMARY
+	local legacy = host.session == "0.8"
+	if button == 5 or (not primary and not legacy and bit.band(mods, hotty.MOD_SHIFT) ~= 0) then
+		return ""
+	end
+	local owner
+	if button == hotty.BUTTON_SECONDARY then
+		owner = legacy and opted(node, "secondary") or not legacy and right_target(node)
+		if owner and (legacy or not doc.on(owner, "rightbutton")) then
+			local id = doc.id(owner)
+			return host:event(surface, legacy and "press" or "contextmenu", id, {
+				c = at.c,
+				r = at.r,
+				mods = mods ~= 0 and mods or nil,
+				button = legacy and button or nil,
+				area = id and area_of(host, surface, owner, at) or nil,
+			})
+		end
+	elseif primary then
+		if doc.ancestor(node, doc.hyperlink) then
+			return M.blur(host)
+		end
+		owner = click_target(node)
+	elseif not legacy then
+		owner = aux_target(node)
+	end
+	if not primary and not owner then
+		return ""
+	end
+	local drag = primary and drag_source(node) or (not primary and owner and doc.on(owner, "drag") and owner)
+	if not doc.id(drag or nil) then
+		drag = nil
+	end
+	local down = { surface = surface, button = button, owner = owner, drag = drag }
+	host.pointer_button = down
+	if drag then
+		down.steps_x, down.steps_y = step_counts(drag)
+		down.start = drag_cell(host, down, nil, at)
+		down.last = { target = drag_target(node), cell = down.start }
+		down.last_cell = down.start
+	end
+	if not primary then
+		return ""
+	end
+	local out = ""
+	if placement.press then
+		local named = doc.ancestor(node, function(n)
+			return doc.id(n) ~= nil
+		end)
+		local detail = { area = area_of(host, surface, named, at), mods = mods ~= 0 and mods or nil }
+		if not named then
 			detail.area = nil
 		end
-		return host:event(surface, kind, id, detail)
+		out = host:event(surface, "press", doc.id(named), next(detail) and detail or nil)
 	end
-	local function cell()
-		return { c = at.c, r = at.r, mods = mods ~= 0 and mods or nil, x = at.x, y = at.y, tx = at.tx, ty = at.ty }
+	out = out .. focus_click(host, surface, node)
+	if drag then
+		down.moving = true
+		out = out .. host:event(surface, "dragstart", doc.id(drag), down.start)
 	end
-	if phase == "down" then
-		local legacy = host.session == "0.8"
-		if button == hotty.BUTTON_SECONDARY then
-			local owner = legacy and opted(node, "secondary") or not legacy and right_target(node)
-			if not owner then
-				return ""
-			end
-			if legacy or not doc.on(owner, "rightbutton") then
-				host.pointer_button = { surface = surface, button = button, menu = true }
-				local detail = cell()
-				detail.area = at.area
-				if legacy then
-					detail.button = button
-				end
-				return send(legacy and "press" or "contextmenu", owner, detail)
-			end
-			node = owner
-		elseif button ~= hotty.BUTTON_PRIMARY then
-			if legacy then
-				return ""
-			end
-			node = opted(node, "aux")
-			if not node then
-				return ""
-			end
-		end
-		local drag = button == hotty.BUTTON_PRIMARY and opted(node, "drag") or nil
-		if button ~= hotty.BUTTON_PRIMARY and doc.on(node, "drag") then
-			drag = node
-		end
-		drag = drag and drag.attrs.id ~= "" and drag.attrs.id and drag or nil
-		host.pointer_button = {
-			surface = surface,
-			button = button,
-			owner = node,
-			drag = drag,
-			start = cell(),
-		}
-		if button == hotty.BUTTON_PRIMARY then
-			host.prefix = nil
-			local out = ""
-			if host.placements[surface].press then
-				out = send("press", node, { mods = cell().mods, area = at.area })
-			end
-			if drag then
-				host.pointer_button.moving = true
-				out = out .. send("dragstart", drag, cell())
-			end
-			return out
-		end
-		return ""
-	end
-	local down = host.pointer_button
-	if not down or down.surface ~= surface or (phase == "up" and down.button ~= button) then
-		return ""
-	end
-	if phase == "up" then
-		host.pointer_button = nil
-	end
-	if down.menu then
-		return ""
-	end
-	local drag_target = doc.ancestor(node, function(n)
-		return n.attrs.id and n.attrs.id ~= "" and (doc.on(n, "drag") or doc.on(n, "drop"))
-	end)
-	if phase == "move" and down.drag then
-		local out = ""
+	return out
+end
+
+local function move_drag(host, down, target, at)
+	local cell = drag_cell(host, down, target, at)
+	down.last_cell = cell
+	local out = ""
+	if not down.moving then
 		local far = at.past_slop
 		if far == nil then
 			far = at.c ~= down.start.c or at.r ~= down.start.r
 		end
-		if not down.moving and not far then
+		if not far then
 			return ""
 		end
-		if not down.moving then
-			down.moving = true
-			down.start.button = down.button
-			out = send("dragstart", down.drag, down.start)
-		end
-		local detail = cell()
-		local last = down.last
-		down.last = { node = drag_target, detail = detail }
-		if
-			last
-			and last.node == drag_target
-			and last.detail.x == detail.x
-			and last.detail.y == detail.y
-			and last.detail.tx == detail.tx
-			and last.detail.ty == detail.ty
-			and (drag_target or (last.detail.c == detail.c and last.detail.r == detail.r))
-		then
-			return out
-		end
-		return out .. send("drag", drag_target, detail)
-	elseif phase == "up" then
-		local out = down.moving and send("dragend", drag_target, cell()) or ""
-		if down.button == hotty.BUTTON_PRIMARY then
-			return out
-		end
-		local release = down.button == hotty.BUTTON_SECONDARY and right_target(node) or nil
-		if down.button ~= hotty.BUTTON_SECONDARY then
-			release = opted(node, "aux")
-		end
-		if release == down.owner and not down.moving then
-			local detail = link_detail(down.owner, cell())
-			detail.button, detail.area = down.button, at.area
-			return out .. send("auxclick", down.owner, detail)
-		end
+		down.moving = true
+		local detail = vim.tbl_extend("force", down.start, { button = down.button })
+		out = host:event(down.surface, "dragstart", doc.id(down.drag), detail)
+	end
+	local last = down.last
+	down.last = { target = target, cell = cell }
+	if
+		last.target == target
+		and last.cell.x == cell.x
+		and last.cell.y == cell.y
+		and last.cell.tx == cell.tx
+		and last.cell.ty == cell.ty
+		and (target or (last.cell.c == cell.c and last.cell.r == cell.r))
+	then
 		return out
+	end
+	return out .. host:event(down.surface, "drag", doc.id(target), cell)
+end
+
+local function release_pointer(host, down, node, at)
+	local surface = down.surface
+	local target = drag_target(node)
+	local out = ""
+	if down.moving then
+		out = host:event(surface, "dragend", doc.id(target), drag_cell(host, down, target, at))
+	end
+	local owner = down.owner
+	if not owner then
+		return out
+	end
+	local mods = at.mods ~= 0 and at.mods or nil
+	local area = area_of(host, surface, owner, at)
+	if down.button == hotty.BUTTON_PRIMARY then
+		if
+			(not down.moving or drag_source(node) == down.drag)
+			and not doc.ancestor(node, doc.hyperlink)
+			and click_target(node) == owner
+		then
+			out = out .. activate(host, surface, owner, { area = area, mods = mods })
+		end
+	elseif not down.moving then
+		local release
+		if down.button == hotty.BUTTON_SECONDARY then
+			release = right_target(node)
+		else
+			release = aux_target(node)
+		end
+		if release == owner then
+			local id = doc.id(owner)
+			local detail = link_detail(owner, { c = at.c, r = at.r, mods = mods, button = down.button })
+			detail.area = (id or detail.href) and area or nil
+			out = out .. host:event(surface, "auxclick", id, detail)
+		end
+	end
+	return out
+end
+
+-- All buttons in a chord stay with the first route until the last up.
+-- Only the first press can create a surface gesture.
+function M.pointer(host, surface, phase, target, button, at)
+	local state = host.docs[surface]
+	local node = state and (type(target) == "table" and target or doc.find(state.tree, target))
+	if phase == "down" then
+		if host.held_buttons then
+			host.held_buttons[button] = true
+			return ""
+		end
+		host.held_buttons = { [button] = true }
+		return begin_pointer(host, surface, state, node, button, at)
+	end
+	local down = host.pointer_button
+	if down and (surface ~= down.surface or at.outside) then
+		node = nil
+	end
+	if phase == "up" then
+		if host.held_buttons then
+			host.held_buttons[button] = nil
+			if not next(host.held_buttons) then
+				host.held_buttons = nil
+			end
+		end
+		if down and down.button == button then
+			host.pointer_button = nil
+			return release_pointer(host, down, node, at)
+		end
+	elseif phase == "move" and down and down.drag then
+		return move_drag(host, down, drag_target(node), at)
 	end
 	return ""
 end

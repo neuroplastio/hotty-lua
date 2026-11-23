@@ -377,22 +377,15 @@ local function vector_body(value)
 	return json.is_array(value) and mp.array(out) or out
 end
 
-local function check_events(events, expected, what, pointer)
+local function check_events(events, expected, what)
 	eq(#events, #expected, what .. ": number of events")
 	for j, event in ipairs(events) do
 		local want = expected[j]
 		eq(event.e, want.e, what .. ": event kind")
 		eq(event.s, want.s, what .. ": event surface")
 		eq(event.t, want.t ~= vim.NIL and want.t or nil, what .. ": event target")
-		if want.detail then
-			-- The test host has no box for a keyboard click.
-			local detail = vim.deepcopy(want.detail)
-			if not pointer then
-				detail.area = nil
-			end
-			if next(detail) then
-				eq(event.detail, detail, what .. ": event detail")
-			end
+		if want.detail ~= nil then
+			eq(event.detail, want.detail ~= vim.NIL and want.detail or nil, what .. ": event detail")
 		end
 	end
 end
@@ -450,61 +443,8 @@ local function check_inspect(host, step, what)
 	end
 end
 
--- Cell boxes from the pointer vectors' CSS, in hit order. The test supplies
--- these to the fake host so the signed vectors can exercise button routing
--- even though the host has no renderer.
-local COMMON_BOXES = {
-	{ "i", 3, 1, 3, 1 },
-	{ "o", 0, 0, 9, 3 },
-	{ "k", 0, 4, 3, 1 },
-	{ "n", 10, 0, 3, 1 },
-}
-local POINTER_BOXES = {
-	["a secondary press on an element with contextmenu"] = COMMON_BOXES,
-	["another button's press on an element with aux"] = COMMON_BOXES,
-	["back and forward come under the same aux"] = COMMON_BOXES,
-	["another button released anywhere but on the element"] = COMMON_BOXES,
-	["what ends a drag early ends another button's hold"] = COMMON_BOXES,
-	["contextmenu and aux do not cross"] = {
-		{ "s", 0, 0, 3, 1 },
-		{ "a", 4, 0, 3, 1 },
-		{ "b", 8, 0, 3, 1 },
-	},
-	["for the secondary button the nearer of rightbutton and contextmenu decides"] = {
-		{ "i", 2, 1, 3, 1 },
-		{ "j", 14, 1, 3, 1 },
-		{ "o", 0, 0, 10, 3 },
-		{ "q", 11, 0, 9, 3 },
-	},
-}
-local MOD_BITS = { shift = 1, alt = 2, ctrl = 4, super = 8 }
-
-local function pointer_input(host, pointer, boxes, step)
-	if step.pointer == "move" then
-		pointer.surface = step.s
-		pointer.target, pointer.area = nil, nil
-		local at = step.at
-		for _, box in ipairs(boxes) do
-			local name, c, r, w, h = unpack(box)
-			if
-				at == name or (type(at) == "table" and at[1] >= c and at[1] < c + w and at[2] >= r and at[2] < r + h)
-			then
-				pointer.target, pointer.area = name, { c = c, r = r, w = w, h = h }
-				pointer.c = type(at) == "table" and at[1] or c + math.floor(w / 2)
-				pointer.r = type(at) == "table" and at[2] or r + math.floor(h / 2)
-				break
-			end
-		end
-		if type(at) == "table" then
-			pointer.c, pointer.r = at[1], at[2]
-		end
-	end
-	pointer.mods = 0
-	for _, name in ipairs(step.keys or {}) do
-		pointer.mods = bit.bor(pointer.mods, MOD_BITS[name])
-	end
-	return host:pointer(pointer.surface, step.pointer, pointer.target, step.button, pointer)
-end
+local pointerfixtures = require("pointerfixtures")
+local HOST_REQUIRES = { ["speaks-0.8"] = true, ["menu-key"] = true }
 
 test("the fake host runs protocol vectors with explicit pointer fixtures", function()
 	local hotty = require("hotty")
@@ -514,32 +454,21 @@ test("the fake host runs protocol vectors with explicit pointer fixtures", funct
 		local number = assert(tonumber(spelling))
 		return spelling:find("[.eE]") and mp.float(number) or number
 	end)).vectors
-	local ran, requires, pointer, failures = 0, 0, 0, {}
+	local ran, requires, failures = 0, 0, {}
 	for i, vector in ipairs(vectors) do
-		local missing, has_pointer = false, false
-		local boxes
-		for prefix, fixture in pairs(POINTER_BOXES) do
-			if vector.name:sub(1, #prefix) == prefix then
-				boxes = fixture
-				break
-			end
-		end
+		local missing = false
 		local features = type(vector.requires) == "string" and { vector.requires } or vector.requires or {}
 		for _, feature in ipairs(features) do
-			missing = missing or feature ~= "speaks-0.8"
-		end
-		for _, step in ipairs(vector.steps) do
-			has_pointer = has_pointer or step.pointer ~= nil or step.touch ~= nil
+			missing = missing or not HOST_REQUIRES[feature]
 		end
 		if missing then
 			requires = requires + 1
-		elseif has_pointer and not boxes then
-			pointer = pointer + 1
 		else
 			ran = ran + 1
 			local ok, err = pcall(function()
 				local host = fakehost.new({ lenient = true })
-				local point = {}
+				local boxes = pointerfixtures.for_vector(vector.name)
+				local pointer = pointerfixtures.new(host, boxes)
 				for j, step in ipairs(vector.steps) do
 					local what = "step " .. j
 					local out = ""
@@ -560,7 +489,8 @@ test("the fake host runs protocol vectors with explicit pointer fixtures", funct
 							eq(not used, step.terminal, what .. ": reached the terminal")
 						end
 					elseif step.pointer then
-						out = pointer_input(host, point, boxes, step)
+						assert(boxes, "missing pointer fixture")
+						out = pointer(step)
 					elseif step.inspect then
 						check_inspect(host, step, what)
 					else
@@ -581,7 +511,7 @@ test("the fake host runs protocol vectors with explicit pointer fixtures", funct
 						local want = vim.tbl_filter(function(ev)
 							return ev.e ~= "fit"
 						end, step.events)
-						check_events(events, want, what, boxes ~= nil)
+						check_events(events, want, what)
 					end
 				end
 			end)
@@ -590,13 +520,7 @@ test("the fake host runs protocol vectors with explicit pointer fixtures", funct
 			end
 		end
 	end
-	say(
-		("host vectors %d passed, %d require unsupported features, %d need pointer layout"):format(
-			ran - #failures,
-			requires,
-			pointer
-		)
-	)
+	say(("host vectors %d passed, %d skipped (requires)"):format(ran - #failures, requires))
 	if #failures > 0 then
 		fail(table.concat(failures, "\n"))
 	end
@@ -696,6 +620,115 @@ test("focus fixup checks href, contenteditable and tabindex without CSS layout",
 	eq(used, true)
 	_, events = host_messages(out)
 	eq(events, { { e = "focus", s = "card", t = "last" } })
+end)
+
+test("the document body merges missing bindings and ignores body tags in deltas", function()
+	local hotty = require("hotty")
+	local document = require("document")
+	local host = fakehost.new()
+	host:feed(hotty.query())
+	host:feed(hotty.doc(
+		"card",
+		[[
+		<html data-keys-inner="q=program"><body id=body data-keys-inner="s=program">
+			<div id=target></div>
+		</body><body id=duplicate data-keys="mod+u=prefix" data-keys-inner="r=prefix"></body></html>
+	]]
+	))
+	local tree = host.docs.card.tree
+	local body = document.find(tree, "body")
+	eq(body.attrs["data-keys"], "mod+u=prefix")
+	eq(body.attrs["data-keys-inner"], "s=program")
+	eq(document.find(tree, "duplicate"), nil)
+	host:feed(hotty.set_text("card", "target", "keep"))
+	host:feed(
+		hotty.delta(
+			"card",
+			{ hotty.append("target", '<body id=fragment data-keys="x=prefix"><b id=child>child</b></body>') }
+		)
+	)
+	eq(document.find(tree, "fragment"), nil)
+	eq(document.find(tree, "child").parent.attrs.id, "target")
+	host:feed(hotty.focus("card"))
+	eq(host:key("q"), false)
+	eq(host.prefix, false)
+	eq(host:key("s"), false)
+	eq(host.prefix, false)
+	eq(host:key("ctrl+u"), false)
+	eq(host.prefix, true)
+end)
+
+test("focus eligibility, detached replacement and readonly controls", function()
+	local hotty = require("hotty")
+	local host = fakehost.new()
+	host:feed(hotty.query())
+	host:feed(hotty.doc(
+		"card",
+		[[
+		<base href="https://example.com/docs/">
+		<a id=link href=next target=_blank tabindex=0>Next</a>
+		<details open><summary id=first>First</summary><summary id=second>Second</summary></details>
+		<summary id=outside>Outside</summary>
+		<input id=field readonly value=apple data-on=input>
+	]]
+	))
+	for _, id in ipairs({ "link", "second", "outside" }) do
+		host:feed(hotty.focus("card", id))
+		eq(host.focused, nil)
+	end
+	host:key("tab")
+	eq(host.focused.attrs.id, "first")
+	host:key("tab")
+	eq(host.focused.attrs.id, "field")
+	for _, key in ipairs({ "x", "backspace", "delete" }) do
+		local used, out = host:key(key)
+		eq({ used, out }, { true, "" })
+	end
+	eq({ host.focused.field.value, host.focused.rev }, { "apple", 0 })
+	host:feed(hotty.set_field("card", "field", { rev = 0, value = "pear" }))
+	eq({ host.focused.field.value, host.focused.rev }, { "pear", 0 })
+	eq(host:feed(hotty.doc("card", "<input id=next>", { detached = true })), "")
+	eq(host.keyboard, nil)
+	eq(host.focused, nil)
+	eq(host.prefix, nil)
+end)
+
+test("aux resolves relative URLs and keeps declined chords with the terminal", function()
+	local hotty = require("hotty")
+	local host = fakehost.new()
+	host:feed(hotty.query())
+	host:feed(hotty.doc(
+		"card",
+		[[
+		<base href="https://example.com/docs/">
+		<a id=link href="../next?view=1#anchor" data-on=aux>Next</a>
+		<a id=external href=next target=_blank data-on=aux>External</a>
+		<div id=parent data-on=aux><a id=child href=next target=_blank data-on=aux>Child</a></div>
+		<b id=menu data-on=contextmenu>Menu</b>
+	]]
+	))
+	host:feed(hotty.place("card", { cols = 12, rows = 3 }))
+	local function pointer(phase, target, button, mods)
+		local _, events = host_messages(host:pointer("card", phase, target, button, { c = 1, r = 0, mods = mods }))
+		return events
+	end
+	pointer("down", "link", 1)
+	eq(pointer("up", "link", 1)[1].detail.url, "https://example.com/next?view=1#anchor")
+	pointer("down", "child", 1)
+	local event = pointer("up", "child", 1)[1]
+	eq(event.t, "parent")
+	eq(event.detail.href, nil)
+	for _, target in ipairs({ "external", "link" }) do
+		local mods = target == "link" and hotty.MOD_ALT or 0
+		eq(pointer("down", target, 1, mods), {})
+		eq(pointer("down", "menu", 2), {})
+		eq(pointer("up", target, 1), {})
+		eq(pointer("down", "link", 3), {})
+		eq(pointer("up", "menu", 2), {})
+		eq(pointer("up", "link", 3), {})
+		eq(pointer("down", "menu", 2)[1].e, "contextmenu")
+		eq(pointer("up", "menu", 2), {})
+	end
 end)
 
 test("the host answers in the highest version a query shares, EVERSION when none", function()

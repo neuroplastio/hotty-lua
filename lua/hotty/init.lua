@@ -347,7 +347,7 @@ local function command(pairs_, payload, default_q, opts)
 	return M.encode(pairs_, payload, opts)
 end
 
---- The versions the query lists, lowest first, comma-separated ("0.7,0.8").
+--- The versions the query lists, lowest first, comma-separated ("0.8,0.9").
 function M.query_versions()
 	local list = {}
 	for i = 1, #M.VERSIONS do

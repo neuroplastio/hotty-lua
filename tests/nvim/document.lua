@@ -72,9 +72,9 @@ local function read_markup(html, start)
 	end
 end
 
-function M.parse(html)
+function M.parse(html, fragment)
 	local root = { tag = "", attrs = {}, children = {} }
-	local parent, pos = root, 1
+	local parent, pos, body = root, 1, nil
 	local lower = html:lower()
 	while pos <= #html do
 		local start = html:find("<", pos, true) or #html + 1
@@ -86,7 +86,16 @@ function M.parse(html)
 		if markup then
 			closing, tag, attrs = markup:match("^(/?)([%a][%w%-]*)(.*)$")
 		end
-		if html:sub(start, start + 3) == "<!--" then
+		if tag and tag:lower() == "body" and fragment then
+			pos = next_pos
+		elseif tag and tag:lower() == "body" and closing == "" and body then
+			for key, value in pairs(attributes(attrs)) do
+				if body.attrs[key] == nil then
+					body.attrs[key] = value
+				end
+			end
+			parent, pos = body, next_pos
+		elseif html:sub(start, start + 3) == "<!--" then
 			pos = (html:find("-->", start + 4, true) or #html) + 3
 		elseif tag and closing == "/" then
 			tag = tag:lower()
@@ -101,6 +110,16 @@ function M.parse(html)
 				parent = parent.parent
 			end
 			local node = { tag = tag, attrs = attributes(attrs), children = {}, rev = 0 }
+			if tag == "body" then
+				parent = root
+				for _, child in ipairs(root.children) do
+					if child.tag == "html" then
+						parent = child
+						break
+					end
+				end
+				body = node
+			end
 			append(parent, node)
 			pos = next_pos
 			if TEXT[tag] then
@@ -185,6 +204,87 @@ function M.on(node, name)
 	return (" " .. (node.attrs["data-on"] or "") .. " "):match("%s" .. name .. "%s") ~= nil
 end
 
+-- Resolve the URL components used by the test host. The default origin
+-- participates in resolution but its URLs are omitted from events.
+local DEFAULT_BASE = "https://hotty.invalid/"
+local function split_url(url)
+	return url:match("^([%a][%w+.-]*:)//([^/?#]+)(.*)$")
+end
+
+local function normalize_path(path)
+	local segments = {}
+	for segment in (path:sub(2) .. "/"):gmatch("([^/]*)/") do
+		if segment == ".." then
+			segments[#segments] = nil
+		elseif segment ~= "." then
+			segments[#segments + 1] = segment
+		end
+	end
+	if path:match("/%.%.?$") then
+		segments[#segments + 1] = ""
+	end
+	return "/" .. table.concat(segments, "/")
+end
+
+function M.link_url(node)
+	local href = node.tag == "a" and node.attrs.href
+	if not href then
+		return nil
+	end
+	href = vim.trim(href)
+	local root = node
+	while root.parent do
+		root = root.parent
+	end
+	local base = M.walk(root, function(n)
+		return n.tag == "base"
+	end)
+	local scheme, authority, tail = split_url(base and vim.trim(base.attrs.href or "") or "")
+	if not scheme or (scheme:lower() ~= "https:" and scheme:lower() ~= "http:") then
+		scheme, authority, tail = split_url(DEFAULT_BASE)
+	end
+	if href:sub(1, 2) == "//" then
+		href = scheme .. href
+	end
+	local absolute_scheme, absolute_authority, absolute_tail = split_url(href)
+	if absolute_scheme then
+		scheme, authority, href, tail = absolute_scheme, absolute_authority, absolute_tail, "/"
+	elseif href:match("^[%a][%w+.-]*:") then
+		return href
+	end
+	local path, suffix = href:match("^([^?#]*)(.*)$")
+	local base_path, base_query = tail:match("^([^?#]*)([^#]*)")
+	base_path = base_path ~= "" and base_path or "/"
+	if path == "" then
+		path = base_path
+		if not absolute_scheme and suffix:sub(1, 1) ~= "?" then
+			suffix = base_query .. suffix
+		end
+	elseif path:sub(1, 1) ~= "/" then
+		path = base_path:match("^(.*/)") .. path
+	end
+	if scheme:lower() == "https:" and authority:lower() == "hotty.invalid" then
+		return nil
+	end
+	return scheme:lower() .. "//" .. authority:lower() .. normalize_path(path) .. suffix
+end
+
+function M.hyperlink(node)
+	return node.tag == "a" and (node.attrs.target or ""):lower() == "_blank" and M.link_url(node) ~= nil
+end
+
+local function first_summary(node)
+	local parent = node.parent
+	if parent and parent.tag == "details" then
+		for _, child in ipairs(parent.children) do
+			if child.tag == "summary" then
+				return child == node
+			end
+		end
+	end
+	return false
+end
+
 function M.reader(node)
 	if not node then
 		return "element"
@@ -196,7 +296,11 @@ function M.reader(node)
 		return "multiline"
 	elseif tag == "select" then
 		return "select"
-	elseif tag == "button" or tag == "summary" or (tag == "a" and attrs.href) then
+	elseif
+		tag == "button"
+		or (tag == "summary" and first_summary(node))
+		or (tag == "a" and attrs.href and not M.hyperlink(node))
+	then
 		return "button"
 	elseif tag == "input" then
 		if input == "date" or input == "time" or input == "datetime-local" or input == "month" or input == "week" then
@@ -221,7 +325,7 @@ function M.focusable(node)
 		return false
 	end
 	local tag, attrs = node.tag, node.attrs
-	if tag == "input" and (attrs.type or ""):lower() == "hidden" then
+	if M.hyperlink(node) or (tag == "input" and (attrs.type or ""):lower() == "hidden") then
 		return false
 	end
 	local control = tag == "input" or tag == "button" or tag == "select" or tag == "textarea"
@@ -351,7 +455,7 @@ function M.apply(root, node, op, focused)
 		node.vars[op.key] = op.value
 	elseif kind == "morph" and node == root then
 		local missing = {}
-		for _, child in ipairs(M.parse(op.value or "").children) do
+		for _, child in ipairs(M.parse(op.value or "", true).children) do
 			local id = child.attrs and child.attrs.id
 			if id then
 				local prior = M.find(root, id)
@@ -366,7 +470,7 @@ function M.apply(root, node, op, focused)
 			return table.concat(missing, ",")
 		end
 	elseif kind ~= "scroll" and kind ~= "reveal" then
-		local children = kind ~= "remove" and op.value and M.parse(op.value).children or {}
+		local children = kind ~= "remove" and op.value and M.parse(op.value, true).children or {}
 		if kind == "morph" then
 			local other = children[1]
 			if #children == 1 and other.tag == node.tag then
