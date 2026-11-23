@@ -1250,8 +1250,8 @@ test("doc's scroll: the axes as given; nil and 0 send no key", function()
 end)
 
 test("query: the SDK's version, and late after it", function()
-	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.7,0.8\27\\\27[c")
-	eq(hotty.query(3, { late = true }), "\27]7279;a=q:n=3:v=0.7,0.8:late=1\27\\\27[c")
+	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.8,0.9\27\\\27[c")
+	eq(hotty.query(3, { late = true }), "\27]7279;a=q:n=3:v=0.8,0.9:late=1\27\\\27[c")
 	eq(hotty.withdraw_late(), "\27]7279;a=q:q=2\27\\", "no version")
 	local last = hotty.CODES[#hotty.CODES]
 	eq(last, hotty.EVERSION)
@@ -1576,15 +1576,15 @@ test("features: named, and asked with has", function()
 	eq(c:has(hotty.FEATURE_BACKDROP), true)
 	eq(hotty.caps(mp.pack({ v = hotty.VERSION, features = { "hover" } })):has(hotty.FEATURE_BACKDROP), false)
 	eq(hotty.MENU_DEPTH, 8)
-	eq(hotty.VERSION, "0.8")
-	eq(table.concat(hotty.VERSIONS, " "), "0.7 0.8", "lowest first")
-	eq(hotty.query_versions(), "0.7,0.8", "the query lists them lowest first")
-	eq(hotty.speaks("0.7") and hotty.speaks("0.8"), true)
+	eq(hotty.VERSION, "0.9")
+	eq(table.concat(hotty.VERSIONS, " "), "0.8 0.9", "lowest first")
+	eq(hotty.query_versions(), "0.8,0.9", "the query lists them lowest first")
+	eq(hotty.speaks("0.8") and hotty.speaks("0.9"), true)
 	eq(
-		hotty.speaks("0.6")
+		hotty.speaks("0.7")
 			or hotty.speaks("0.5")
 			or hotty.speaks("99.0")
-			or hotty.speaks("0.7,0.8")
+			or hotty.speaks("0.8,0.9")
 			or hotty.speaks(nil),
 		false
 	)
@@ -1822,7 +1822,7 @@ test("detector: a reply to the query is a host only in the SDK's version", funct
 		eq(d.caps, nil)
 		eq(d.deadline, 310)
 	end
-	for _, v in ipairs({ "0.7", "0.8" }) do
+	for _, v in ipairs({ "0.8", "0.9" }) do
 		local d = hotty.detector()
 		d:start(0)
 		eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = v })), 10), true)
@@ -1837,9 +1837,9 @@ test("detector: a reply to the query is a host only in the SDK's version", funct
 	local d = hotty.detector({ late = true })
 	d:start(0)
 	d:reply(reply({ { "a", "err" }, { "n", "1" }, { "re", "q" } }), 10)
-	eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.7" })), 20), true)
+	eq(d:reply(reply({ { "a", "ok" }, { "n", "1" }, { "re", "q" } }, mp.pack({ v = "0.8" })), 20), true)
 	eq(d.state, hotty.NATIVE, "with late, a host after the error")
-	eq(d.caps.v, "0.7")
+	eq(d.caps.v, "0.8")
 end)
 
 -- keys, field -------------------------------------------------------------------

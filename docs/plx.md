@@ -4,6 +4,13 @@ How hotty-lua runs in plx, and what `hotty.plx`, the adapter of SDK.md §4.2
 for plx scripts, is built on. plexos owns plx's side; this is what the two
 agreed on 2026-10-07 (plexos `vault/tasks/hotty-sdks.md`, HOTTY-LUA-01).
 
+Use the session's negotiated `caps.v` to choose document attributes.
+For 0.9, put inherited bindings in `data-keys-inner` and listen for
+`contextmenu`. For 0.8, put inherited bindings in `data-keys` and
+listen for a `press` with `hotty.BUTTON_SECONDARY` on elements with
+`secondary` in `data-on`. The plx terminal relay owns wheel routing,
+including wheels at a surface's edge on the alternate screen.
+
 ## What runs today
 
 - **plx-script has the wire layer built in.** Since plexos 8b1b3a0 it vendors
@@ -11,7 +18,7 @@ agreed on 2026-10-07 (plexos `vault/tasks/hotty-sdks.md`, HOTTY-LUA-01).
   preloads it into every script's state, so `require("hotty")` works with
   no `package.path`. `make hotty-lua REV=<sha>` in plexos refreshes the copy.
   From hotty 0.2 the copy has `hotty.msgpack` and `hotty.utf8`, and no
-  `hotty.json`. hotty 0.3 to 0.8 change no seam; the delta, the menu, the
+  `hotty.json`. hotty 0.3 to 0.9 change no seam; the delta, the menu, the
   key names, the backdrop, scroll and hit are written in `init.lua` and `keys.lua`.
   The state is gopher-lua v1.1.2 with every standard library, no `bit`, and
   a registry raised for `table.concat` over many strings. `make check` here
@@ -136,7 +143,7 @@ no fences. What plx-script gives it, as agreed:
    causes; it draws no frame itself. The adapter reads `hotty.caps(raw)`
    and sends its documents again. Capabilities that do not decode, or whose
    `v` is not a version this hotty-lua speaks (`hotty.VERSIONS`, `"0.8"` and
-   `"0.7"`; `hotty.speaks(v)`),
+   `"0.9"`; `hotty.speaks(v)`),
    none included, are no host (SPEC §4).
 2. **Sending.** `ctx:hotty_send(s)` writes hotty commands (the builders'
    strings) for the script's own surfaces to the instance's output, in

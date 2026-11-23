@@ -5,21 +5,17 @@ HTML over the TTY. With it, a Lua program shows small HTML documents, called
 surfaces, on rectangles of cells, and hears what the user does in them. It
 is written for two places: Neovim plugins, and plx scripts.
 
-It speaks hotty 0.8 and 0.7 (`hotty.VERSIONS`, SPEC §4, §15): a host of
-either is a host to it, and `caps.v` says which one it met. A 0.7 host has
-no `scroll` op or `hit` query, so a program that sends either checks
-`caps.v` (SDK.md §3.8). A host's replies and events carry msgpack bodies
-(SPEC §3.3), a delta is one list of ops (SPEC §6.1), keys are named as
-myelin key names 0.1 names them (SPEC §10.4), and its query lists the
-versions it speaks, lowest first (`a=q:n=1:v=0.7,0.8`, SPEC §4). A terminal
-of no version it lists, a 0.6 one included, is no host to it, and the
-program draws in cells. [Upgrading from 0.7](#upgrading-from-07),
-[from 0.6](#upgrading-from-06), [from 0.5](#upgrading-from-05),
-[from 0.4](#upgrading-from-04), [from 0.3](#upgrading-from-03) and
-[from 0.2](#upgrading-from-02) list what callers change.
+It speaks hotty 0.9 and 0.8. The query lists both versions lowest first
+(`v=0.8,0.9`), and `caps.v` is the one the host negotiated. A 0.7 host
+leads to the cells rendition. Replies, events, and deltas carry MessagePack
+bodies, and keys use myelin key names 0.1. See
+[Upgrading from 0.8](#upgrading-from-08),
+[from 0.7](#upgrading-from-07), [from 0.6](#upgrading-from-06),
+[from 0.5](#upgrading-from-05), [from 0.4](#upgrading-from-04),
+[from 0.3](#upgrading-from-03) and [from 0.2](#upgrading-from-02).
 
-0.8.x speaks hotty 0.8, and 0.7 too; the patch number is this repository's own. It is
-on luarocks.org as `hotty` (0.8.0 is not published yet), for Lua 5.1 and
+0.9.x speaks hotty 0.9 and 0.8. The patch number belongs to this repository.
+The package is `hotty` on LuaRocks, for Lua 5.1 and
 LuaJIT:
 
 ```
@@ -27,9 +23,9 @@ luarocks install hotty
 ```
 
 `luarocks make` builds a checkout, from its rockspec
-(`hotty-0.8.0-1.rockspec`).
+(`hotty-0.9.0-1.rockspec`).
 
-It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/hotty-0.8/SDK.md)
+It meets [SDK.md](https://github.com/neuroplastio/hotty/blob/hotty-0.9/SDK.md)
 in two layers:
 
 - `require("hotty")` is the **wire layer** (SDK.md §3): it builds commands,
@@ -71,7 +67,7 @@ an error.
 
 | SDK.md | hotty |
 | --- | --- |
-| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`, `VERSIONS`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `MOD_SHIFT`, `MOD_ALT`, `MOD_CTRL`, `MOD_SUPER`, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
+| constants (§3.1) | `NUMBER`, `CHUNK`, `MAX_SIZE`, `MAX_NAME`, `VERSION`, `VERSIONS`; `EVENT_CLICK` …, `FEATURES`, `FEATURE_MENU` …, `BUTTON_PRIMARY` through `BUTTON_FORWARD`, `MOD_SHIFT`, `MOD_ALT`, `MOD_CTRL`, `MOD_SUPER`, `EINVAL` …, `OP_MORPH` …, `REPLY_ALWAYS`, `REPLY_ON_ERROR`, `NO_REPLY`; `SCROLL_VERTICAL`, `SCROLL_HORIZONTAL`; `REVEAL_START` …, `MENU_DEPTH` |
 | Control (§3.2) | `hotty.control(pairs)`, `:get(k)` (value, present), `:with(k, v)` |
 | Encode (§3.3) | `hotty.encode(control, payload, opts)` |
 | commands (§3.4) | `query` (`{ late = true }`), `withdraw_late`, `doc`, `place`, `place_at`, `hide`, `delta`, `set_text`, `set_var`, `set_attr`, `remove_attr`, `morph_to`, `reveal`, `scroll`, `hit`, `set_field`, `res`, `del_res`, `del`, `del_all`, `detach`, `focus`, `blur`, `edit`, `menu`, `menu_show`, `menu_hide`, `touch`, `sync` |
@@ -83,7 +79,7 @@ an error.
 | Decoder (§3.6) | `hotty.decoder()`, `:feed(seq)` (result, message), `.invalid` |
 | Scanner (§3.7) | `hotty.scanner({ da1 = true })`, `:feed(bytes)` (segments), `:flush()`, `:holding()`, `:in_sequence()`, `.invalid` |
 | Detector (§3.8) | `hotty.speaks(v)`, `hotty.query_versions()`, `hotty.detector({ n = 1, late = false })`, `:start(now)`, `:da1(now)`, `:reply(r, now)`, `:tick(now)`, `:finish(now)`; `.state`, `.caps`, `.decided`, `.done`, `.deadline` |
-| keys (§3.10) | `parse_key(name)`, `read_key(platform, name)`, `decode_keys(input)`, `key_text(key)`, `parse_keymap(platform, value)`, `resolve(platform, multiline, value…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:binds(key)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:prefix(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
+| keys (§3.10) | `parse_key(name)`, `read_key(platform, name)`, `decode_keys(input)`, `key_text(key)`, `parse_keymap(platform, value)`, `resolve(platform, reader, own, inner…)`, `platform_of(caps)`, `default_edit(mod)`, `keymap:binds(key)`, `keymap:lookup(key)`, `keymap:selects(key)`, `keymap:program(key)`, `keymap:prefix(key)`, `keymap:scroll(key)`, `keymap:format()`; `TERMINAL_KEYS`, `READERS`, `ACTIONS`, `MOVES`, `SCROLL_ACTIONS`, `INSERT` |
 | messages (§3.9) | `msg:reply()`, `msg:event()`, `msg:body()`; `reply:caps()`, `reply:err()`, `reply.op`, `reply.hit`; `event:value()`, `:checked()`, `:fields()`, `:mods()`, `:button()`, `:c()`, `:r()`, `:link()`, `:fit_rows()`, `:drag()`, `:hover()`, `:area()`, `:count()`, `:view()`, `:command()`, `:changed()`; `hotty.caps(body)`, `caps:merge(changed)`, `caps.cell_css`, `caps.features` and the other fields; `caps:has(feature)`, `:light()` |
 
 Where Lua differs:
@@ -162,6 +158,42 @@ Where Lua differs:
   and the body does not decode. An int further than 2^53 − 1 from 0 does
   not decode either. [`docs/plx.md`](docs/plx.md) has the contract.
 
+## Upgrading from 0.8
+
+- `VERSION` is `"0.9"` and `VERSIONS` is `{ "0.8", "0.9" }`.
+- Open a context menu from `EVENT_CONTEXTMENU`. Use `aux` in `data-on`
+  to receive `EVENT_AUXCLICK` on release for the middle, back and forward
+  buttons. `rightbutton` takes the secondary button for `auxclick` or a drag.
+- `resolve(platform, reader, own, inner…)` takes one of `input`,
+  `multiline`, `button`, `select`, `date`, `element` or `selection`.
+  Pass the focused element's `data-keys` as `own` and the ancestors'
+  `data-keys-inner` from the root down as `inner`. Use the body's own
+  bindings plus the root's and body's inner bindings when nothing is
+  focused. A selection uses those same attributes and its `lookup` returns
+  `"copy"` or `nil`. `parse_keymap` reads either attribute.
+- Move a wrapper's inherited bindings to `data-keys-inner`. When
+  `caps.v == "0.8"`, use `data-keys` for those bindings as well.
+  Write `key=default` in the focused element's own `data-keys` to give
+  the key back to its defaults.
+- A removed or unfocusable element loses focus without a `blur` event.
+  A text field that remains in the document commits the user's edits
+  with `change`.
+
+### Context menus
+
+Use `data-on="contextmenu secondary"` to handle both negotiated versions.
+On 0.9, open from `contextmenu`. On 0.8, open from a `press` whose
+`ev:button() == hotty.BUTTON_SECONDARY`. A primary `press` has a nil
+button field. Place the menu at `ev:c(), ev:r()` or under `ev:area()`
+when the gesture came from the keyboard and has no pointer cell. A host
+may pass `shift+f10` or `context_menu` through as keys instead. Use the
+last focused target to open its menu on those keys.
+
+Place the menu above the surface with a higher `z`, give it focus, and
+close it on `blur`, Escape or a pick. A `dragstart` without a button
+field reads as `BUTTON_PRIMARY`. Keep the button from `dragstart`
+for the rest of the drag. [SDK context menus](https://github.com/neuroplastio/hotty/blob/hotty-0.9/SDK.md#47-context-menus)
+
 ## Upgrading from 0.7
 
 - **`VERSION` is `"0.8"`, and `VERSIONS` lists `{ "0.7", "0.8" }`**, lowest
@@ -211,7 +243,7 @@ move together:
 - **Enter commits a text field, in a form or not.** Enter in an `input` the
   user changed sends `change`, and in a form `change` then `submit`. A
   program that read a lone field only on `blur` hears it on Enter too.
-- **The version is `"0.8"`, and 0.7 too**: a 0.6 host is no host.
+- **The current versions are `"0.8"` and `"0.9"`**.
 
 ## Upgrading from 0.4
 
@@ -226,7 +258,7 @@ move together:
   `input`, and do not resend with the `rev` the detail names.
 - **`caret`** (`EVENT_CARET`) is a new event kind, and `input` carries `sel`
   for a field with `data-on~=caret`.
-- **The version is `"0.8"`, and 0.7 too**: a 0.6 host is no host.
+- **The current versions are `"0.8"` and `"0.9"`**.
 
 ## Upgrading from 0.3
 
@@ -251,7 +283,7 @@ menus, and its tests' fake hosts move together:
   it types (`ctrl+key_w`, `ctrl+w`).
 - **`MOD_CONTROL` and `MOD_META`** are `MOD_CTRL` and `MOD_SUPER`, with the
   same bits.
-- **The version is `"0.8"`, and 0.7 too**: a 0.6 host is no host.
+- **The current versions are `"0.8"` and `"0.9"`**.
 
 ## Upgrading from 0.2
 
@@ -281,11 +313,9 @@ What a caller changes (SDK.md Appendix C):
 - **A submit's `ev:fields()`** is a list of `{ name, value }` pairs, in
   order, not a table by name.
 - **A drag's `keys`** are `ev:mods()`, bits; clicks and presses carry them.
-- **A secondary press** (hotty 0.7, SPEC §9) is a `press` from an element with
-  `secondary` in its `data-on`: `ev:button()` is 2 and `ev:c()`, `ev:r()` are
-  the pointer's cell (they may be negative); a primary press reads `button()`
-  0, and `c()` and `r()` nil. A handler meaning the primary button checks
-  `ev:button() == 0`.
+- **A secondary press** in an 0.8 session carries `ev:button()` equal to
+  `BUTTON_SECONDARY` and the pointer's cell in `ev:c()` and `ev:r()`.
+  See [Context menus](#context-menus) for the 0.9 event.
 - **`hotty.menu(level)` is `hotty.menu(tree)`** with `name` and nested
   `items` in place of `seq`, `group` and the level a key reaches; send the
   tree when what the program can do changes, `menu_show(keys)` for each
@@ -302,20 +332,19 @@ selection, edited as a host edits one on a surface, for a program that
 draws its fields in cells. With the same keymap on both sides, a field
 edits the same in cells and on a surface, Shift selecting with a move:
 
+On a 0.9 surface, put `hotty.TERMINAL_KEYS` in the `data-keys-inner`
+of the element that holds the fields. Use `"multiline"` for a multi-line
+field in cells.
+
 ```lua
-local km = hotty.resolve(hotty.platform_of(caps), false, hotty.TERMINAL_KEYS) -- and data-keys="…" on the surface's root
-local f = hotty.field({ value = "foo bar" }) -- opts: value, caret, anchor, multiline, password, rows
+local km = hotty.resolve(hotty.platform_of(caps), "input", "", hotty.TERMINAL_KEYS)
+local f = hotty.field({ value = "foo bar" })
 for _, key in ipairs(hotty.decode_keys(input)) do
-	local action = key and km:lookup(key)
-	if action == hotty.INSERT then
-		f:type(hotty.key_text(key)) -- in place of the selection
-	elseif action and km:selects(key) then
-		f:extend(action) -- shift+arrow_left, ctrl+shift+end: the caret moves, the anchor stays
-	elseif action and action ~= "submit" then
-		f:do_action(action) -- true when the value changed
+	if key then
+		f:key(km, key) -- true when the value changed
 	end
 end
-local from, to = f:selection() -- equal when nothing is selected
+local from, to = f:selection()
 ```
 
 **`do` is a keyword**, so the Field's Do is `do_action`; `f["do"]` is the
@@ -417,8 +446,10 @@ And under luajit, `tests/rockspec.lua`: the newest rockspec's MAJOR.MINOR is
 
 And under `nvim -l`, `tests/nvim/run.lua`: each test runs a Neovim in a
 pseudo-terminal, plays its terminal with a fake host
-(`tests/nvim/fakehost.lua`, the test host of SDK.md §4.4 as far as these
-tests need it), drives it over RPC, and reads what the host was sent.
+(`tests/nvim/fakehost.lua`), drives it over RPC, and reads what the host
+was sent. The fake host also runs keyboard vectors, exercises pointer
+gestures by element ID, and does focus fixup for document changes. It
+has no CSS layout.
 `HOTTY_TEST=<part of a name>` runs some of them.
 
 CI (`.github/workflows/ci.yml`) runs `make check` on GitHub's hosted
