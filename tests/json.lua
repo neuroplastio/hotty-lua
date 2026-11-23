@@ -97,7 +97,7 @@ local function decode_string(s, i)
 end
 
 -- -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?
-local function decode_number(s, i)
+local function decode_number(s, i, read_number)
 	local j = i
 	if byte(s, j) == 45 then
 		j = j + 1
@@ -131,10 +131,10 @@ local function decode_number(s, i)
 		end
 		j = e + 1
 	end
-	return tonumber(sub(s, i, j - 1)), j
+	return read_number(sub(s, i, j - 1)), j
 end
 
-local function decode_array(s, i, depth)
+local function decode_array(s, i, depth, read_number)
 	local out, n = setmetatable({}, ARRAY), 0
 	i = skip(s, i + 1)
 	if byte(s, i) == 93 then
@@ -142,7 +142,7 @@ local function decode_array(s, i, depth)
 	end
 	while true do
 		local v
-		v, i = decode_value(s, i, depth)
+		v, i = decode_value(s, i, depth, read_number)
 		n = n + 1
 		out[n] = v
 		i = skip(s, i)
@@ -156,7 +156,7 @@ local function decode_array(s, i, depth)
 	end
 end
 
-local function decode_object(s, i, depth)
+local function decode_object(s, i, depth, read_number)
 	local out = setmetatable({}, OBJECT)
 	i = skip(s, i + 1)
 	if byte(s, i) == 125 then
@@ -173,7 +173,7 @@ local function decode_object(s, i, depth)
 			fail(i, "expected :")
 		end
 		local v
-		v, i = decode_value(s, skip(s, i + 1), depth)
+		v, i = decode_value(s, skip(s, i + 1), depth, read_number)
 		out[k] = v
 		i = skip(s, i)
 		local c = byte(s, i)
@@ -186,19 +186,19 @@ local function decode_object(s, i, depth)
 	end
 end
 
-function decode_value(s, i, depth)
+function decode_value(s, i, depth, read_number)
 	if depth > MAX_DEPTH then
 		fail(i, "too deep")
 	end
 	local c = byte(s, i)
 	if c == 123 then
-		return decode_object(s, i, depth + 1)
+		return decode_object(s, i, depth + 1, read_number)
 	elseif c == 91 then
-		return decode_array(s, i, depth + 1)
+		return decode_array(s, i, depth + 1, read_number)
 	elseif c == 34 then
 		return decode_string(s, i)
 	elseif c == 45 or (c and c >= 48 and c <= 57) then
-		return decode_number(s, i)
+		return decode_number(s, i, read_number)
 	elseif sub(s, i, i + 3) == "true" then
 		return true, i + 4
 	elseif sub(s, i, i + 4) == "false" then
@@ -209,10 +209,11 @@ function decode_value(s, i, depth)
 	fail(i, "unexpected input")
 end
 
---- The value JSON text s holds, or nil and an error.
-function M.decode(s)
+--- The value JSON text s holds, or nil and an error. read_number can preserve
+--- the JSON spelling of a float whose value is a whole number.
+function M.decode(s, read_number)
 	local ok, v, i = pcall(function()
-		local v, i = decode_value(s, skip(s, 1), 0)
+		local v, i = decode_value(s, skip(s, 1), 0, read_number or tonumber)
 		return v, skip(s, i)
 	end)
 	if not ok then

@@ -2,12 +2,12 @@
 -- small as those tests need). It reads what a Neovim writes to its terminal
 -- and answers as a terminal and a hotty host would:
 --
---   - the terminal: DA1, the cursor report (DSR 5n), synchronized output's
+--   - the terminal: DA1, the status and cursor reports (DSR 5n and 6n), synchronized output's
 --     DECRQM, the background colour; it follows the cursor through CUP and
 --     ESC 7 / ESC 8, so it knows where each placement lands, and an erase in
 --     display (ED 2 or 3) drops every placement, as hottyterm does;
 --   - the host (when native): the query, answered in the highest version it
---     shares with the query (versions, "0.8" and "0.7"; version names one) or
+--     shares with the query (versions, "0.9" and "0.8"; version names one) or
 --     with EVERSION, and every command, kept as
 --     surfaces and placements, with replies as SPEC §3.6 has them. It lays
 --     nothing out: r=auto gets auto_rows;
@@ -15,11 +15,14 @@
 --     query that asks for a late answer (SPEC §4), until another query takes
 --     its place, and become_host answers it as the host does.
 --
--- Strict: a malformed hotty message, or a hotty command other than the query
--- sent to a terminal that is not a host, is recorded in problems.
+-- Strict: malformed messages, EINVAL and commands sent before a host attaches
+-- fail the test. Lenient hosts keep these problems for inspection.
 
 local hotty = require("hotty")
 local mp = require("msgpack_writer")
+local document = require("document")
+local utf8 = require("hotty.utf8")
+local input = require("userinput")
 
 local M = {}
 local Host = {}
@@ -31,7 +34,7 @@ local function caps_in(v)
 		v = v,
 		cellcss = { w = mp.float(9), h = mp.float(18) },
 		scale = mp.float(1),
-		features = { "hover", "count", "menu" },
+		features = mp.array({}),
 		scheme = "dark",
 		-- message: the limit its decoder keeps (SPEC §13).
 		limits = { surfaces = 64, message = hotty.DEFAULT_MAX },
@@ -44,10 +47,12 @@ function M.new(opts)
 	opts = opts or {}
 	return setmetatable({
 		native = opts.native ~= false,
+		lenient = opts.lenient == true,
 		-- the versions it speaks, highest first; the session's is the one it answered
-		versions = opts.version and { opts.version } or opts.versions or { "0.8", "0.7" },
+		versions = opts.version and { opts.version } or opts.versions or { "0.9", "0.8" },
 		session = nil,
 		caps = opts.caps,
+		platform = opts.platform,
 		auto_rows = opts.auto_rows or 4,
 		scanner = hotty.scanner(),
 		decoder = hotty.decoder(),
@@ -56,6 +61,9 @@ function M.new(opts)
 		saved = { x = 0, y = 0 },
 		docs = {}, -- surface to { html, detached }
 		placements = {}, -- surface to { x, y, c, r, window, z, p, f, v, C }
+		resources = {},
+		touch = { main = {}, alternate = {} },
+		screen = "main",
 		flags = {}, -- surface to { p, f, v }: they belong to the surface (SPEC §5.2)
 		log = {}, -- every hotty command, in order: { a, s, control, payload }
 		queries = 0,
@@ -76,9 +84,19 @@ local function quiet(c)
 	return tonumber(c.q or ((c.n or c.a == "q" or c.a == "hit") and "0" or "1")) or 1
 end
 
+function Host:problem(problem)
+	self.problems[#self.problems + 1] = problem
+	if not self.lenient then
+		error(problem)
+	end
+end
+
 -- Answers a command as SPEC §3.6 has hosts do: an error unless q is 2, an ok
 -- only when q is 0.
 function Host:answer(m, err, extra, detail, body)
+	if err == "EINVAL" then
+		self:problem("invalid " .. (m.control.a or "command") .. ": " .. (detail or ""))
+	end
 	local q = quiet(m.control)
 	local ctl = { { "a", err and "err" or "ok" } }
 	if m.control.n then
@@ -141,6 +159,64 @@ function Host:query_reply(c)
 	return reply(ctl, mp.pack({ code = "EVERSION", detail = table.concat(self.versions, ",") }))
 end
 
+function Host:cancel_pointer(surface, report)
+	local down = self.pointer_button
+	if not down or down.surface ~= surface then
+		return ""
+	end
+	self.pointer_button = nil
+	if report and down.moving then
+		local last = down.last
+		local detail = vim.tbl_extend("force", {}, last and last.detail or down.start)
+		detail.button = nil
+		local node = down.drag
+		if last then
+			node = last.node
+		end
+		return self:event(surface, "dragend", document.id(node), detail)
+	end
+	return ""
+end
+
+local function decimal(value)
+	if value and value:match("^%-?%d+$") then
+		return tonumber(value)
+	end
+end
+
+local function bounded(value, min, max)
+	return value and value >= min and value <= max
+end
+
+local function touch_areas(message)
+	if message.payload == "" then
+		return {}
+	end
+	local body, kinds = message:body()
+	if not body or not kinds[body] or kinds[body].areas ~= "array" or #body.areas > hotty.TOUCH_MAX then
+		return nil
+	end
+	local area_marks = kinds[body.areas]
+	if area_marks and next(area_marks) then
+		return nil
+	end
+	for _, area in ipairs(body.areas) do
+		if type(area) ~= "table" then
+			return nil
+		end
+		for _, name in ipairs({ "c", "r", "w", "h" }) do
+			local min = (name == "c" or name == "r") and 0 or 1
+			if type(area[name]) ~= "number" or (kinds[area] and kinds[area][name]) or area[name] < min then
+				return nil
+			end
+		end
+		if area.drag ~= "x" and area.drag ~= "y" and area.drag ~= "xy" then
+			return nil
+		end
+	end
+	return body.areas
+end
+
 function Host:command(m)
 	local c = m.control
 	local entry = { a = c.a, s = c.s, control = c, payload = m.payload }
@@ -164,26 +240,53 @@ function Host:command(m)
 		return self:query_reply(c)
 	end
 	if not self.native then
-		self.problems[#self.problems + 1] = "a hotty command sent to a terminal that is not a host: a=" .. tostring(c.a)
+		self:problem("a hotty command sent to a terminal that is not a host: a=" .. tostring(c.a))
 		return ""
 	end
 	self.log[#self.log + 1] = entry
 	local s = c.s
+	if s and not hotty.valid_name(s) then
+		return self:answer(m, "EINVAL", nil, "s")
+	end
 	if c.a == "doc" then
-		self.docs[s] = { html = m.payload, detached = c.d == "1" }
+		if not s then
+			return self:answer(m, "EINVAL", nil, "s")
+		elseif not utf8.valid(m.payload) then
+			return self:answer(m, "EINVAL", nil, "document is not UTF-8")
+		end
+		local ended = self:cancel_pointer(s, c.d ~= "1")
+		self.docs[s] = { html = m.payload, tree = document.parse(m.payload), detached = c.d == "1" }
 		self.flags[s] = self.flags[s] or {}
-		return self:answer(m)
+		return ended .. input.fixup(self, s) .. self:answer(m)
 	elseif c.a == "place" then
 		if not self.docs[s] then
 			return self:answer(m, "ENOENT")
 		end
-		local cols = tonumber(c.c)
-		local rows = c.r == "auto" and self.auto_rows or tonumber(c.r)
-		local p = { x = self.cursor.x, y = self.cursor.y, c = cols, r = rows, auto = c.r == "auto" }
-		if c.x then
-			p.window = { x = tonumber(c.x), y = tonumber(c.y), w = tonumber(c.w), h = tonumber(c.h) }
+		local cols = decimal(c.c)
+		local rows = (c.r == nil or c.r == "auto") and self.auto_rows or decimal(c.r)
+		local z = c.z and decimal(c.z) or nil
+		if
+			not bounded(cols, 1, hotty.MAX_SIZE)
+			or not bounded(rows, 1, hotty.MAX_SIZE)
+			or (c.z and not bounded(z, -1000, 1000))
+		then
+			return self:answer(m, "EINVAL", nil, "placement")
 		end
-		p.z, p.C = tonumber(c.z), c.C == "1"
+		local p = { x = self.cursor.x, y = self.cursor.y, c = cols, r = rows, auto = c.r == nil or c.r == "auto" }
+		if c.x or c.y or c.w or c.h then
+			local x, y = decimal(c.x or "0"), decimal(c.y or "0")
+			local w, h = decimal(c.w) or (not c.w and x and cols - x), decimal(c.h) or (not c.h and y and rows - y)
+			if
+				not bounded(x, 0, cols - 1)
+				or not bounded(y, 0, rows - 1)
+				or not bounded(w, 1, cols - x)
+				or not bounded(h, 1, rows - y)
+			then
+				return self:answer(m, "EINVAL", nil, "window")
+			end
+			p.window = { x = x, y = y, w = w, h = h }
+		end
+		p.z, p.C = z, c.C == "1"
 		-- p, f and v are the surface's: 1 on, 0 off, held; any other value is
 		-- as if absent.
 		local fl = self.flags[s]
@@ -211,58 +314,90 @@ function Host:command(m)
 		end
 		-- No layout: every cell holds no element, even on a placed surface.
 		return self:answer(m, nil, nil, nil, mp.pack({}))
-	elseif c.a == "hide" or c.a == "delta" or c.a == "detach" or c.a == "focus" or c.a == "blur" then
-		if not self.docs[s] then
+	elseif c.a == "hide" or c.a == "delta" or c.a == "detach" or c.a == "focus" or c.a == "blur" or c.a == "field" then
+		local state = self.docs[s]
+		if not s then
+			return self:answer(m, "EINVAL", nil, "s")
+		elseif not state then
 			return self:answer(m, "ENOENT")
 		end
+		local out, code, detail = "", nil, nil
 		if c.a == "delta" then
 			local ops, err = hotty.delta_of(m)
 			if err then
-				self.problems[#self.problems + 1] = "a delta the host refuses: " .. err.detail
 				return self:answer(m, "EINVAL", err.op and { { "i", tostring(err.op) } } or nil, err.detail)
 			end
-			-- This small host has no DOM or layout. Find ids in the documents
-			-- its tests send; scroll and reveal move nothing.
-			local ids = {}
-			for attrs in self.docs[s].html:gmatch("<[%w]+([^>]*)>") do
-				for id in attrs:gmatch('%s+id="([^"]*)"') do
-					ids[id] = true
-				end
-				for id in attrs:gmatch("%s+id='([^']*)'") do
-					ids[id] = true
-				end
-				for id in attrs:gmatch([[%s+id=([^%s"'>]+)]]) do
-					ids[id] = true
-				end
-			end
+			local extra
 			for i, op in ipairs(ops) do
-				if
-					(op.op == "scroll" or op.op == "reveal")
-					and op.target
-					and op.target ~= ""
-					and not ids[op.target]
-				then
-					return self:answer(m, "ENOTARGET", { { "i", tostring(i - 1) } }, op.target)
+				local target = op.target
+				local node = target and target ~= "" and document.find(state.tree, target) or nil
+				if node or ((not target or target == "") and (op.op == "morph" or op.op == "scroll")) then
+					local missing = document.apply(state.tree, node or state.tree, op, self.focused)
+					if missing and not code then
+						code, detail, extra = "ENOTARGET", missing, { { "i", tostring(i - 1) } }
+					end
+				elseif not code then
+					code, detail, extra = "ENOTARGET", target, { { "i", tostring(i - 1) } }
 				end
 			end
-		end
-		if c.a == "hide" then
+			return input.fixup(self, s) .. self:answer(m, code, extra, detail)
+		elseif c.a == "field" then
+			if state.detached then
+				code = "EDETACHED"
+			else
+				code, detail = input.set_field(self, m)
+			end
+		elseif c.a == "focus" then
+			if state.detached then
+				code = "EDETACHED"
+			else
+				out, code = input.focus(self, s, c.t)
+				detail = code and c.t
+			end
+		elseif c.a == "blur" then
+			if self.keyboard == s then
+				out = input.blur(self)
+			end
+		elseif c.a == "hide" then
 			self.placements[s] = nil
+			out = self:cancel_pointer(s, true)
 		elseif c.a == "detach" then
-			self.docs[s].detached = true
+			state.detached = true
+			self:cancel_pointer(s, false)
+			if self.keyboard == s then
+				self.keyboard, self.focused, self.prefix = nil, nil, nil
+			end
 		end
-		return self:answer(m)
+		return out .. self:answer(m, code, nil, detail)
 	elseif c.a == "del" then
 		if s then
 			if not self.docs[s] then
 				return self:answer(m, "ENOENT")
 			end
+			if self.keyboard == s then
+				self.keyboard, self.focused, self.prefix = nil, nil, nil
+			end
+			self:cancel_pointer(s, false)
 			self.docs[s], self.placements[s], self.flags[s] = nil, nil, nil
-		elseif not c.id then
+		elseif c.id then
+			self.resources[c.id] = nil
+		else
+			self.keyboard, self.focused, self.prefix, self.pointer_button = nil, nil, nil, nil
 			self.docs, self.placements, self.flags = {}, {}, {}
 		end
 		return self:answer(m)
 	elseif c.a == "res" then
+		if not c.id or c.id == "" or not c.type or c.type == "" then
+			return self:answer(m, "EINVAL", nil, "resource")
+		end
+		self.resources[c.id] = { type = c.type, bytes = m.payload }
+		return self:answer(m)
+	elseif c.a == "touch" then
+		local areas = touch_areas(m)
+		if not areas then
+			return self:answer(m, "EINVAL", nil, "areas")
+		end
+		self.touch[self.screen] = areas
 		return self:answer(m)
 	end
 	return self:answer(m, "EINVAL")
@@ -287,8 +422,15 @@ function Host:terminal(data)
 				out[#out + 1] = "\27[?62;22c"
 			elseif final == "n" and csi == "5" then
 				out[#out + 1] = "\27[0n"
+			elseif final == "n" and csi == "6" then
+				out[#out + 1] = ("\27[%d;%dR"):format(self.cursor.y + 1, self.cursor.x + 1)
 			elseif final == "p" and csi == "?2026$" then
 				out[#out + 1] = "\27[?2026;2$y"
+			elseif csi == "?1049" and final == "h" then
+				self.screen = "alternate"
+			elseif csi == "?1049" and final == "l" then
+				self.screen = "main"
+				self.touch.alternate = {}
 			elseif final == "J" and (csi == "2" or csi == "3") then
 				self.placements = {} -- an erase in display takes them (SDK.md §4.3)
 				self.erased = (self.erased or 0) + 1
@@ -336,7 +478,7 @@ function Host:feed(data)
 			if result == hotty.COMPLETE then
 				out[#out + 1] = self:command(m)
 			elseif result == hotty.INVALID then
-				self.problems[#self.problems + 1] = "a malformed hotty message: " .. seg.data:sub(1, 60)
+				self:problem("a malformed hotty message: " .. seg.data:sub(1, 60))
 			end
 		else
 			out[#out + 1] = self:terminal(seg.data)
@@ -353,6 +495,16 @@ function Host:event(surface, kind, target, detail)
 		ctl[#ctl + 1] = { "t", target } -- absent where no element is meant (SPEC §9)
 	end
 	return hotty.encode(ctl, body)
+end
+
+--- Play a key by name. Returns whether the surface used it, and events.
+function Host:key(key)
+	return input.key(self, key)
+end
+
+--- Play named-element pointer input with the cells supplied by the test.
+function Host:pointer(surface, phase, target, button, at)
+	return input.pointer(self, surface, phase, target, button or hotty.BUTTON_PRIMARY, at or {})
 end
 
 --- The terminal becomes a host, as one attaching to a multiplexer's pane
@@ -372,7 +524,9 @@ end
 --- The host forgets every surface, as a full reset does.
 function Host:forget()
 	self.docs, self.placements, self.flags = {}, {}, {}
+	self.resources, self.touch, self.screen = {}, { main = {}, alternate = {} }, "main"
 	self.session, self.held, self.held_query = nil, nil, nil
+	self.keyboard, self.focused, self.prefix, self.pointer_button = nil, nil, nil, nil
 end
 
 --- The commands logged, of action a (and surface s).

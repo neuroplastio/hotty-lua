@@ -192,7 +192,7 @@ test("a host: detected native, with its capabilities", function(spawn)
 		return t.lua("return T.mode") == "native"
 	end, "native")
 	eq(t.lua("return T.host"), "fake")
-	eq(t.lua("return T.term.caps.v"), "0.8")
+	eq(t.lua("return T.term.caps.v"), "0.9")
 	eq(t.host.queries, 1)
 	eq(t.host.problems, {})
 	return t
@@ -232,7 +232,7 @@ test(
 		wait(function()
 			return t.host.placements["t-card"] ~= nil
 		end, "the card's placement")
-		eq(t.lua("return T.term.caps.v"), "0.8")
+		eq(t.lua("return T.term.caps.v"), "0.9")
 		eq(t.host.queries, 1)
 		eq(t.host.problems, {})
 		return t
@@ -342,109 +342,360 @@ local function typed(v, kind, want, kinds)
 	return true
 end
 
-test("the fake host answers a query as the conformance vectors' hosts do", function()
+local function host_messages(out)
 	local hotty = require("hotty")
-	local f = assert(io.open(root .. "/tests/vectors.json", "rb"))
-	local data = vim.json.decode(f:read("*a"))
-	f:close()
-	local ran = 0
-	for _, v in ipairs(data.vectors) do
-		-- This fake host speaks 0.7 as well (SDK.md §4.4), so it runs what a host
-		-- that does is asked.
-		local queries = v.requires == nil or (#v.requires == 1 and v.requires[1] == "speaks-0.7")
-		for _, st in ipairs(v.steps) do
-			queries = queries and st.send ~= nil and st.send.a == "q" and st.payload == nil
+	local scanner, decoder = hotty.scanner(), hotty.decoder()
+	local replies, events = {}, {}
+	for _, seg in ipairs(scanner:feed(out)) do
+		eq(seg.kind, "osc")
+		local status, message = decoder:feed(seg.data)
+		if status == hotty.COMPLETE then
+			if message.control.a == "ev" then
+				local c = message.control
+				events[#events + 1] = { e = c.e, s = c.s, t = c.t, detail = message:body() }
+			else
+				replies[#replies + 1] = message
+			end
+		else
+			eq(status, hotty.MORE)
 		end
-		if queries then
-			ran = ran + 1
-			local host = fakehost.new()
-			for i, st in ipairs(v.steps) do
-				local what = v.name .. ", step " .. i
-				local ctl = { { "a", "q" } }
-				for k, val in pairs(st.send) do
-					if k ~= "a" then
-						ctl[#ctl + 1] = { k, val }
-					end
-				end
-				local out = host:feed(hotty.encode(ctl))
-				local want = st.reply
-				if want == vim.NIL then
-					eq(out, "", what)
-				elseif want ~= nil then
-					local seg = hotty.scanner():feed(out)[1]
-					local result, m = hotty.decoder():feed(seg and seg.data or "")
-					eq(result, hotty.COMPLETE, what)
-					local r = m:reply()
-					for k, w in pairs(want) do
-						if k == "code" or k == "detail" then
-							eq(r[k], w, what .. ": " .. k)
-						elseif k == "body" or k == "types" then
-							local body, kinds = m:body()
-							eq(r.ok and type(body), "table", what .. ": an ok's body")
-							if k == "types" then
-								eq(typed(body, nil, w, kinds), true, what .. ": types")
-							end
-							for name, field in pairs(k == "body" and w or {}) do
-								eq(body[name], field, what .. ": body." .. name)
-							end
-						else
-							eq(m.control[k], w, what .. ": " .. k)
-						end
-					end
-				end
+	end
+	return replies, events
+end
+
+local json = require("json")
+local mp = require("msgpack_writer")
+
+local function vector_body(value)
+	if type(value) ~= "table" or getmetatable(value) == nil then
+		return value
+	end
+	local out = {}
+	for k, child in pairs(value) do
+		out[k] = vector_body(child)
+	end
+	return json.is_array(value) and mp.array(out) or out
+end
+
+local function check_events(events, expected, what, pointer)
+	eq(#events, #expected, what .. ": number of events")
+	for j, event in ipairs(events) do
+		local want = expected[j]
+		eq(event.e, want.e, what .. ": event kind")
+		eq(event.s, want.s, what .. ": event surface")
+		eq(event.t, want.t ~= vim.NIL and want.t or nil, what .. ": event target")
+		if want.detail then
+			-- The test host has no box for a keyboard click.
+			local detail = vim.deepcopy(want.detail)
+			if not pointer then
+				detail.area = nil
+			end
+			if next(detail) then
+				eq(event.detail, detail, what .. ": event detail")
 			end
 		end
 	end
-	eq(ran, 6, "query vectors run")
+end
+
+local function check_reply(replies, expected, what)
+	if expected == nil then
+		return
+	elseif expected == vim.NIL then
+		eq(#replies, 0, what .. ": replies")
+		return
+	end
+	eq(#replies, 1, what .. ": replies")
+	local message = replies[1]
+	local reply = message:reply()
+	for key, value in pairs(expected) do
+		if key == "code" or key == "detail" then
+			eq(reply[key], value, what .. ": " .. key)
+		elseif key == "body" then
+			local body = assert(message:body())
+			for name, field in pairs(value) do
+				eq(body[name], field ~= vim.NIL and field or nil, what .. ": body." .. name)
+			end
+		elseif key == "types" then
+			local body, kinds = message:body()
+			eq(typed(body, nil, value, kinds), true, what .. ": types")
+		else
+			eq(message.control[key], value ~= vim.NIL and value or nil, what .. ": " .. key)
+		end
+	end
+end
+
+local function key_name(step)
+	local name = step.key == " " and "space" or step.key
+	return table.concat(vim.list_extend(vim.deepcopy(step.keys or {}), { name }), "+")
+end
+
+local function check_inspect(host, step, what)
+	local document = require("document")
+	local state = host.docs[step.inspect[1]]
+	local node = state and document.find(state.tree, step.inspect[2])
+	if step.expect == vim.NIL then
+		eq(node, nil, what)
+		return
+	end
+	assert(node, what .. ": no element " .. step.inspect[2])
+	local children = {}
+	for _, child in ipairs(node.children) do
+		if child.tag then
+			children[#children + 1] = { child.tag, child.attrs.id or vim.NIL, document.text(child) }
+		end
+	end
+	local actual = { tag = node.tag, attrs = node.attrs, text = document.text(node), children = children }
+	for k, v in pairs(step.expect) do
+		eq(actual[k], v, what .. ": " .. k)
+	end
+end
+
+-- Cell boxes from the pointer vectors' CSS, in hit order. The test supplies
+-- these to the fake host so the signed vectors can exercise button routing
+-- even though the host has no renderer.
+local COMMON_BOXES = {
+	{ "i", 3, 1, 3, 1 },
+	{ "o", 0, 0, 9, 3 },
+	{ "k", 0, 4, 3, 1 },
+	{ "n", 10, 0, 3, 1 },
+}
+local POINTER_BOXES = {
+	["a secondary press on an element with contextmenu"] = COMMON_BOXES,
+	["another button's press on an element with aux"] = COMMON_BOXES,
+	["back and forward come under the same aux"] = COMMON_BOXES,
+	["another button released anywhere but on the element"] = COMMON_BOXES,
+	["what ends a drag early ends another button's hold"] = COMMON_BOXES,
+	["contextmenu and aux do not cross"] = {
+		{ "s", 0, 0, 3, 1 },
+		{ "a", 4, 0, 3, 1 },
+		{ "b", 8, 0, 3, 1 },
+	},
+	["for the secondary button the nearer of rightbutton and contextmenu decides"] = {
+		{ "i", 2, 1, 3, 1 },
+		{ "j", 14, 1, 3, 1 },
+		{ "o", 0, 0, 10, 3 },
+		{ "q", 11, 0, 9, 3 },
+	},
+}
+local MOD_BITS = { shift = 1, alt = 2, ctrl = 4, super = 8 }
+
+local function pointer_input(host, pointer, boxes, step)
+	if step.pointer == "move" then
+		pointer.surface = step.s
+		pointer.target, pointer.area = nil, nil
+		local at = step.at
+		for _, box in ipairs(boxes) do
+			local name, c, r, w, h = unpack(box)
+			if
+				at == name or (type(at) == "table" and at[1] >= c and at[1] < c + w and at[2] >= r and at[2] < r + h)
+			then
+				pointer.target, pointer.area = name, { c = c, r = r, w = w, h = h }
+				pointer.c = type(at) == "table" and at[1] or c + math.floor(w / 2)
+				pointer.r = type(at) == "table" and at[2] or r + math.floor(h / 2)
+				break
+			end
+		end
+		if type(at) == "table" then
+			pointer.c, pointer.r = at[1], at[2]
+		end
+	end
+	pointer.mods = 0
+	for _, name in ipairs(step.keys or {}) do
+		pointer.mods = bit.bor(pointer.mods, MOD_BITS[name])
+	end
+	return host:pointer(pointer.surface, step.pointer, pointer.target, step.button, pointer)
+end
+
+test("the fake host runs protocol vectors with explicit pointer fixtures", function()
+	local hotty = require("hotty")
+	local source = table.concat(vim.fn.readfile(root .. "/tests/vectors.json"), "\n")
+	local vectors = vim.json.decode(source).vectors
+	local typed_vectors = assert(json.decode(source, function(spelling)
+		local number = assert(tonumber(spelling))
+		return spelling:find("[.eE]") and mp.float(number) or number
+	end)).vectors
+	local ran, requires, pointer, failures = 0, 0, 0, {}
+	for i, vector in ipairs(vectors) do
+		local missing, has_pointer = false, false
+		local boxes
+		for prefix, fixture in pairs(POINTER_BOXES) do
+			if vector.name:sub(1, #prefix) == prefix then
+				boxes = fixture
+				break
+			end
+		end
+		local features = type(vector.requires) == "string" and { vector.requires } or vector.requires or {}
+		for _, feature in ipairs(features) do
+			missing = missing or feature ~= "speaks-0.8"
+		end
+		for _, step in ipairs(vector.steps) do
+			has_pointer = has_pointer or step.pointer ~= nil or step.touch ~= nil
+		end
+		if missing then
+			requires = requires + 1
+		elseif has_pointer and not boxes then
+			pointer = pointer + 1
+		else
+			ran = ran + 1
+			local ok, err = pcall(function()
+				local host = fakehost.new({ lenient = true })
+				local point = {}
+				for j, step in ipairs(vector.steps) do
+					local what = "step " .. j
+					local out = ""
+					if step.send then
+						local body = typed_vectors[i].steps[j].body
+						local payload = body and mp.pack(vector_body(body))
+							or (step.payload_b64 and vim.base64.decode(step.payload_b64))
+							or step.payload
+						local control = {}
+						for k, v in pairs(step.send) do
+							control[#control + 1] = { k, v }
+						end
+						out = host:feed(hotty.encode(control, payload))
+					elseif step.key then
+						local used
+						used, out = host:key(key_name(step))
+						if step.terminal ~= nil then
+							eq(not used, step.terminal, what .. ": reached the terminal")
+						end
+					elseif step.pointer then
+						out = pointer_input(host, point, boxes, step)
+					elseif step.inspect then
+						check_inspect(host, step, what)
+					else
+						out = host:feed(assert(step.write, what))
+					end
+					local replies, events = host_messages(out)
+					local expected = step.reply
+					if
+						type(expected) == "table"
+						and step.send.a == "place"
+						and (not step.send.r or step.send.r == "auto")
+					then
+						expected = vim.tbl_extend("force", {}, expected)
+						expected.r = nil -- the fake host supplies an estimate
+					end
+					check_reply(replies, expected, what)
+					if step.events then
+						local want = vim.tbl_filter(function(ev)
+							return ev.e ~= "fit"
+						end, step.events)
+						check_events(events, want, what, boxes ~= nil)
+					end
+				end
+			end)
+			if not ok then
+				failures[#failures + 1] = vector.name .. " — " .. err
+			end
+		end
+	end
+	say(
+		("host vectors %d passed, %d require unsupported features, %d need pointer layout"):format(
+			ran - #failures,
+			requires,
+			pointer
+		)
+	)
+	if #failures > 0 then
+		fail(table.concat(failures, "\n"))
+	end
 end)
 
-test("the fake host checks scroll, reveal and hit without layout", function()
+test("the fake host plays context menus, auxiliary clicks and drags by element", function()
 	local hotty = require("hotty")
-	local f = assert(io.open(root .. "/tests/vectors.json", "rb"))
-	local data = vim.json.decode(f:read("*a"))
-	f:close()
-	local ran = 0
-	for _, v in ipairs(data.vectors) do
-		if
-			v.name:find("hit is answered", 1, true)
-			or v.name:find("^scroll: a missing target")
-			or v.name:find("^reveal: a missing target")
-		then
-			ran = ran + 1
-			local host = fakehost.new()
-			for i, st in ipairs(v.steps) do
-				local ctl = {}
-				for k, value in pairs(st.send) do
-					ctl[#ctl + 1] = { k, value }
-				end
-				local payload = st.body and require("msgpack_writer").pack(st.body) or st.payload
-				local out = host:feed(hotty.encode(ctl, payload))
-				local what = v.name .. ", step " .. i
-				if st.reply == vim.NIL then
-					eq(out, "", what)
-				elseif st.reply then
-					local segs = hotty.scanner():feed(out)
-					eq(#segs, 1, what .. ": one reply, no events")
-					local result, m = hotty.decoder():feed(segs[1].data)
-					eq(result, hotty.COMPLETE, what)
-					local r = m:reply()
-					for k, value in pairs(st.reply) do
-						if k == "body" then
-							local body = assert(m:body())
-							for key, field in pairs(value) do
-								eq(body[key], field ~= vim.NIL and field or nil, what .. ": body." .. key)
-							end
-						elseif k == "code" or k == "detail" then
-							eq(r[k], value, what)
-						else
-							eq(m.control[k], value, what .. ": " .. k)
-						end
-					end
-				end
-			end
+	local area = { c = 0, r = 0, w = 8, h = 1 }
+	local ctx = { c = 2, r = 0, area = area }
+	local html = [[
+		<div id=outer data-on="rightbutton drag">
+			<button id=menu data-on="contextmenu secondary">Menu</button>
+		</div>
+		<button id=aux data-on="aux drag" value="close">Close</button>
+		<a id=link href="next" data-on="aux">Next</a>
+	]]
+	local secondary, middle = hotty.BUTTON_SECONDARY, hotty.BUTTON_MIDDLE
+	for _, version in ipairs({ "0.8", "0.9" }) do
+		local host = fakehost.new({ version = version })
+		host:feed(hotty.query())
+		host:feed(hotty.doc("card", html))
+		host:feed(hotty.place("card", { cols = 12, rows = 3, press = true }))
+		host:feed(hotty.focus("card", "menu"))
+		local function pointer(phase, target, button, at)
+			local _, events = host_messages(host:pointer("card", phase, target, button, at or ctx))
+			return events
+		end
+		local legacy = version == "0.8"
+		eq(pointer("down", "menu", secondary), {
+			{
+				e = legacy and "press" or "contextmenu",
+				s = "card",
+				t = "menu",
+				detail = { button = legacy and secondary or nil, c = 2, r = 0, area = area },
+			},
+		})
+		eq(pointer("up", "menu", secondary), {})
+		eq(pointer("down", "aux", middle), {})
+		if legacy then
+			eq(pointer("up", "aux", middle), {})
+			eq(host:key("context_menu"), false)
+		else
+			eq(pointer("up", "aux", middle), {
+				{
+					e = "auxclick",
+					s = "card",
+					t = "aux",
+					detail = { button = middle, c = 2, r = 0, area = area, value = "close" },
+				},
+			})
+			eq(pointer("down", "link", middle), {})
+			eq(pointer("up", "menu", middle), {})
+			eq(pointer("down", "outer", secondary), {})
+			eq(pointer("up", "menu", secondary), {}, "the inner contextmenu wins at release")
+			eq(pointer("down", "outer", secondary), {})
+			eq(pointer("up", "outer", secondary)[1].detail.button, secondary)
+			eq(pointer("down", "aux", middle), {})
+			eq(pointer("move", "menu", middle, { c = 3, r = 0, past_slop = false }), {})
+			local drag = pointer("move", "menu", middle, { c = 5, r = 1 })
+			eq(drag, {
+				{ e = "dragstart", s = "card", t = "aux", detail = { button = middle, c = 2, r = 0 } },
+				{ e = "drag", s = "card", t = "outer", detail = { c = 5, r = 1 } },
+			})
+			eq(pointer("up", "aux", middle), {
+				{ e = "dragend", s = "card", t = "aux", detail = { c = 2, r = 0 } },
+			})
+			local used, out = host:key("shift+f10")
+			eq(used, true)
+			local _, events = host_messages(out)
+			eq(events, { { e = "contextmenu", s = "card", t = "menu" } })
 		end
 	end
-	eq(ran, 3, "scroll, reveal and hit validation vectors run")
+end)
+
+test("focus fixup checks href, contenteditable and tabindex without CSS layout", function()
+	local hotty = require("hotty")
+	local host = fakehost.new()
+	host:feed(hotty.query())
+	host:feed(hotty.doc(
+		"card",
+		[[
+		<a id=link href=next>Next</a>
+		<div id=edit contenteditable></div>
+		<div id=last tabindex=0>Last</div>
+	]]
+	))
+	host:feed(hotty.focus("card", "link"))
+	local _, events = host_messages(host:feed(hotty.remove_attr("card", "link", "href")))
+	eq(events, {})
+	eq(host.focused, nil)
+	host:feed(hotty.focus("card", "edit"))
+	eq(host:key("x"), true)
+	_, events = host_messages(host:feed(hotty.remove_attr("card", "edit", "contenteditable")))
+	eq(events, { { e = "change", s = "card", t = "edit", detail = { value = "x", rev = 1 } } })
+	eq(host.focused, nil)
+	local used, out = host:key("shift+tab")
+	eq(used, true)
+	_, events = host_messages(out)
+	eq(events, { { e = "focus", s = "card", t = "last" } })
 end)
 
 test("the host answers in the highest version a query shares, EVERSION when none", function()
@@ -463,14 +714,14 @@ test("the host answers in the highest version a query shares, EVERSION when none
 		return r.code .. " " .. r.detail
 	end
 	local host = fakehost.new()
-	eq(answer(host, "0.7,0.8"), "0.8")
-	eq(host.session, "0.8")
-	eq(answer(host, "0.7"), "0.7")
-	eq(host.session, "0.7", "the negotiated 0.7 session")
+	eq(answer(host, "0.8,0.9"), "0.9")
+	eq(host.session, "0.9")
 	eq(answer(host, "0.8"), "0.8")
-	eq(answer(host, "0.5"), "EVERSION 0.8,0.7")
-	eq(answer(fakehost.new({ version = "0.8" }), "0.7"), "EVERSION 0.8")
-	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.7,0.8\27\\\27[c")
+	eq(host.session, "0.8", "the negotiated 0.8 session")
+	eq(answer(host, "0.9"), "0.9")
+	eq(answer(host, "0.5"), "EVERSION 0.9,0.8")
+	eq(answer(fakehost.new({ version = "0.9" }), "0.8"), "EVERSION 0.9")
+	eq(hotty.query(), "\27]7279;a=q:n=1:v=0.8,0.9\27\\\27[c")
 end)
 
 test("a full reset ends the fake host session, including a split ESC c", function()
@@ -480,7 +731,7 @@ test("a full reset ends the fake host session, including a split ESC c", functio
 		host:feed(hotty.query())
 		host:feed(hotty.doc("old", "<p>old</p>", { q = 2 }))
 		host:feed(hotty.place("old", { cols = 10, rows = 1 }, { q = 2 }))
-		eq(host.session, "0.8")
+		eq(host.session, "0.9")
 		if split then
 			host:feed("\27")
 			host:feed("c")
@@ -492,7 +743,7 @@ test("a full reset ends the fake host session, including a split ESC c", functio
 		eq(host.placements, {})
 		eq(host.flags, {})
 		host:feed(hotty.query())
-		eq(host.session, "0.8")
+		eq(host.session, "0.9")
 	end
 end)
 
@@ -574,7 +825,7 @@ test("a click reaches the surface's handler, whose delta reaches the host", func
 end)
 
 test("a secondary press reaches the handler with its button and cell", function(spawn)
-	local t = spawn()
+	local t = spawn({ version = "0.8" })
 	card(t)
 	t.send(t.host:event("t-card", "press", "go", { button = 2, c = 3, r = -1 }))
 	wait(function()
