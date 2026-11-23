@@ -1068,9 +1068,7 @@ function Keymap:binds(key)
 	return k ~= nil and self:bound(k) ~= nil
 end
 
---- What the field does with a key: an action, INSERT for a character it
---- types (key_text), or nil when the key is not the field's.
-function Keymap:lookup(key)
+local function lookup_action(self, key)
 	local k = M.parse_key(key)
 	if not k or FOCUS[k] then
 		return nil
@@ -1091,6 +1089,16 @@ function Keymap:lookup(key)
 	return M.key_text(k) ~= nil and M.INSERT or nil
 end
 
+--- What the field does with a key: an action, INSERT for a character it
+--- types (key_text), or nil when the key is not the field's. On a
+--- selection's keymap, only copy is returned.
+function Keymap:lookup(key)
+	local action = lookup_action(self, key)
+	if self.reader ~= "selection" or action == "copy" then
+		return action
+	end
+end
+
 --- Whether the field selects with a key (SDK.md §3.10, SPEC §10.2, Shift
 --- selects): lookup returns a move for it, and its canonical name has
 --- shift (shift+arrow_left, ctrl+shift+end, not alt+<). The field then
@@ -1108,8 +1116,7 @@ end
 --- the key to program or prefix, or, for a key with shift that is not a
 --- character and that it does not bind, the key without shift. On an
 --- element that is not a text field, a host asks it of the element's
---- keymap, parse_keymap of its data-keys values joined with a space, the
---- root's first, with no default keymap; a key it gives reaches the program
+--- resolved keymap; a key it gives reaches the program
 --- before the element or a scroll uses it (SPEC §10.2, keys for the
 --- program). Tab is given only by a field keymap, from resolve.
 function Keymap:program(key)
@@ -1164,7 +1171,7 @@ local function each_binding(platform, value, fn)
 	end
 end
 
---- A data-keys value's bindings, without those a host ignores, each key
+--- A data-keys or data-keys-inner value's bindings, each key
 --- read on the platform ({mod, edit}, or nil for ctrl). tab=program and
 --- tab=default are kept for fields; other focus bindings are ignored.
 function M.parse_keymap(platform, value)
@@ -1247,15 +1254,8 @@ local MOD_KEYS = {
 	},
 }
 
---- A field's keymap: SPEC §10.2's default for the platform's mod, with its
---- edit shortcuts, then each data-keys value, the root's first. A binding
---- to a scroll action is left out where it stands, in its own value too: it
---- neither acts nor overrides an earlier binding of its key. platform is
---- {mod, edit}, or nil for ctrl and the default edit shortcuts.
-function M.resolve(platform, multiline, ...)
-	platform = platform or {}
+local function default_keymap(platform, multiline)
 	local m = M.keymap(multiline, platform)
-	m.field = true
 	for _, b in ipairs(DEFAULT_KEYS) do
 		m:bind(b[1], b[2])
 	end
@@ -1272,17 +1272,83 @@ function M.resolve(platform, multiline, ...)
 			end
 		end
 	end
-	m.base = M.keymap(multiline, platform)
-	m.base:update(m)
-	local function bind(key, action, written)
-		if not M.SCROLL_ACTIONS[action] then
-			m:bind(key, action, written)
-		end
+	return m
+end
+
+M.READERS = { "input", "multiline", "button", "select", "date", "element", "selection" }
+local READERS = set(M.READERS)
+local CONTROL_KEYS = {
+	button = set({ "space", "enter" }),
+	select = set({ "space", "enter", "arrow_up", "arrow_down", "home", "end", "page_up", "page_down" }),
+	date = set({
+		"space",
+		"enter",
+		"backspace",
+		"delete",
+		"arrow_up",
+		"arrow_down",
+		"arrow_left",
+		"arrow_right",
+		"home",
+		"end",
+		"page_up",
+		"page_down",
+	}),
+}
+
+local function uses(reader, field, key)
+	if field then
+		return M.key_text(key) ~= nil
+	end
+	local keys = CONTROL_KEYS[reader]
+	if not keys then
+		return false
+	end
+	local mods, name, kind = split(key)
+	return not (mods.super or mods.ctrl or mods.alt) and (keys[name] or (reader ~= "button" and kind == "character"))
+end
+
+local function takes(map, key, action, own)
+	if action == "default" then
+		return own
+	elseif action == "program" or action == "prefix" then
+		return own or not uses(map.reader, map.field, key)
+	elseif map.reader == "selection" then
+		return own and action == "copy"
+	end
+	if map.field then
+		return not M.SCROLL_ACTIONS[action]
+	end
+	return M.SCROLL_ACTIONS[action] == true
+end
+
+--- Resolve a reader's keymap. Start with defaults for a field or selection,
+--- apply ancestors' data-keys-inner from the root down, then the element's
+--- own data-keys. A binding the reader does not take leaves earlier ones in place.
+function M.resolve(platform, reader, own, ...)
+	assert(READERS[reader], "resolve: unknown reader " .. tostring(reader))
+	platform = platform or {}
+	local multiline = reader == "multiline"
+	local map = M.keymap(multiline, platform)
+	map.reader = reader
+	map.field = reader == "input" or multiline
+	if map.field or reader == "selection" then
+		map.base = default_keymap(platform, multiline)
+		map:update(map.base)
+	end
+	local function apply(value, is_own)
+		each_binding(platform, value, function(key, action, written)
+			if takes(map, key, action, is_own) then
+				map:bind(key, action, written)
+			end
+		end)
 	end
 	for i = 1, select("#", ...) do
-		each_binding(platform, select(i, ...), bind)
+		local value = select(i, ...)
+		apply(value, false)
 	end
-	return m
+	apply(own, true)
+	return map
 end
 
 return M

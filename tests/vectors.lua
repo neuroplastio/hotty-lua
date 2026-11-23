@@ -696,42 +696,19 @@ local function run_keys(v)
 end
 
 local function run_keymap(v)
-	if v.lookup == nil and (v.program ~= nil or v.prefix ~= nil or v.scroll ~= nil) then
-		-- An element's keymap outside a text field: no default keymap.
-		local m = hotty.parse_keymap(v.platform, table.concat(v.keys, " "))
-		for key, want in pairs(v.program or {}) do
-			local got = m:program(key)
-			if got ~= want then
-				return false, show(key) .. ": program " .. show(got) .. ", want " .. show(want)
-			end
-		end
-		for key, want in pairs(v.prefix or {}) do
-			local got = m:prefix(key)
-			if got ~= want then
-				return false, show(key) .. ": prefix " .. show(got) .. ", want " .. show(want)
-			end
-		end
-		for key, want in pairs(v.scroll or {}) do
-			local got = m:scroll(key)
-			if not equal(got, want) then
-				return false, show(key) .. ": scroll " .. show(got) .. ", want " .. show(want)
-			end
-		end
-		return true, ""
-	end
-	if v.lookup == nil then
+	if v.reader == nil then
 		local got = hotty.parse_keymap(v.platform, v.parse ~= nil and v.parse or hotty.TERMINAL_KEYS):format()
 		return got == v.format, show(got) .. ", want " .. show(v.format)
 	end
-	local layers = {}
+	local inner = {}
 	if v.terminal_keys then
-		layers[1] = hotty.TERMINAL_KEYS
+		inner[1] = hotty.TERMINAL_KEYS
 	end
-	for _, k in ipairs(v.keys) do
-		layers[#layers + 1] = k
+	for _, value in ipairs(v.inner or {}) do
+		inner[#inner + 1] = value
 	end
-	local m = hotty.resolve(v.platform, v.multiline, unpack(layers))
-	for key, want in pairs(v.lookup) do
+	local m = hotty.resolve(v.platform, v.reader, v.own, unpack(inner))
+	for key, want in pairs(v.lookup or {}) do
 		local got = m:lookup(key)
 		if not equal(got, want) then
 			return false, show(key) .. ": " .. show(got) .. ", want " .. show(want)
@@ -747,6 +724,18 @@ local function run_keymap(v)
 		local got = m:program(key)
 		if got ~= want then
 			return false, show(key) .. ": program " .. show(got) .. ", want " .. show(want)
+		end
+	end
+	for key, want in pairs(v.prefix or {}) do
+		local got = m:prefix(key)
+		if got ~= want then
+			return false, show(key) .. ": prefix " .. show(got) .. ", want " .. show(want)
+		end
+	end
+	for key, want in pairs(v.scroll or {}) do
+		local got = m:scroll(key)
+		if not equal(got, want) then
+			return false, show(key) .. ": scroll " .. show(got) .. ", want " .. show(want)
 		end
 	end
 	for key, want in pairs(v.binds or {}) do

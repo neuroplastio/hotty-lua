@@ -321,4 +321,15 @@ function Field:type(s)
 	return true
 end
 
+--- Edit with a resolved field keymap. Returns whether the value changed.
+function Field:key(keymap, key)
+	local action = keymap:lookup(key)
+	if action == keys.INSERT then
+		return self:type(keys.key_text(key))
+	elseif action and keymap:selects(key) then
+		return self:extend(action)
+	end
+	return action ~= nil and self:do_action(action) or false
+end
+
 return M

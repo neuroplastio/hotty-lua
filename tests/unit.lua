@@ -1604,7 +1604,7 @@ test("keymap: prefix is the program's, and prefix tells which", function()
 	eq(hotty.parse_keymap({ mod = "super" }, "mod+j=prefix"):prefix("ctrl+j"), false)
 	eq(m:prefix(""), false)
 	eq(m:prefix("mod+j"), false, "no pressed key has mod")
-	local f = hotty.resolve(nil, false, "arrow_left=prefix")
+	local f = hotty.resolve(nil, "input", "arrow_left=prefix")
 	eq(f:lookup("arrow_left"), nil, "not the field's")
 	eq(hotty.read_key(nil, "Mod+a"), "ctrl+a")
 	eq(hotty.read_key({ mod = "super" }, "Mod+a"), "super+a")
@@ -1844,6 +1844,14 @@ end)
 
 -- keys, field -------------------------------------------------------------------
 
+test("resolve rejects the old boolean flag and unknown readers", function()
+	for _, reader in ipairs({ false, true, "unknown" }) do
+		local ok, err = pcall(hotty.resolve, nil, reader)
+		eq(ok, false)
+		eq(err:find("resolve: unknown reader", 1, true) ~= nil, true)
+	end
+end)
+
 test("decode_keys: input that is no key is false, so the list goes on", function()
 	local keys = hotty.decode_keys("\27[200~a\27[97;1:3u")
 	eq(#keys, 3)
@@ -1910,7 +1918,7 @@ test("keymap: TERMINAL_KEYS reads back as itself", function()
 end)
 
 test("keymap: program in a field's keymap, and with a key that does not parse", function()
-	local f = hotty.resolve(nil, false, "arrow_left=program")
+	local f = hotty.resolve(nil, "input", "arrow_left=program")
 	eq(f:program("arrow_left"), true)
 	eq(f:lookup("arrow_left"), nil, "lookup says as much")
 	eq(f:program("arrow_right"), false)
@@ -1929,7 +1937,7 @@ test("field: do is do_action", function()
 end)
 
 test("keymap: selects with a key that does not parse, or a character", function()
-	local m = hotty.resolve(nil, true)
+	local m = hotty.resolve(nil, "multiline")
 	eq(m:selects(""), false)
 	eq(m:selects("hyper+arrow_left"), false)
 	eq(m:selects("shift+a"), false, "A types")
