@@ -693,7 +693,18 @@ local C0 = {
 	[0x1E] = "ctrl+^",
 	[0x1F] = "ctrl+_",
 }
-local CSI_FINAL = { A = "arrow_up", B = "arrow_down", C = "arrow_right", D = "arrow_left", H = "home", F = "end" }
+local CSI_FINAL = {
+	A = "arrow_up",
+	B = "arrow_down",
+	C = "arrow_right",
+	D = "arrow_left",
+	H = "home",
+	F = "end",
+	P = "f1",
+	Q = "f2",
+	R = "f3",
+	S = "f4",
+}
 local TILDE = {
 	[1] = "home",
 	[7] = "home",
@@ -703,11 +714,25 @@ local TILDE = {
 	[3] = "delete",
 	[5] = "page_up",
 	[6] = "page_down",
+	[11] = "f1",
+	[12] = "f2",
+	[13] = "f3",
+	[14] = "f4",
+	[15] = "f5",
+	[17] = "f6",
+	[18] = "f7",
+	[19] = "f8",
+	[20] = "f9",
+	[21] = "f10",
+	[23] = "f11",
+	[24] = "f12",
+	[29] = "context_menu",
 }
 local CODES = { [9] = "tab", [13] = "enter", [27] = "escape", [8] = "backspace", [127] = "backspace", [32] = "space" }
 -- The kitty keyboard protocol's keypad codes, as a legacy terminal sends
--- the keys (SPEC §10.4); its other codes from 57344 name no key.
+-- the keys (SPEC §10.4), and the menu key.
 local KITTY = {
+	[57363] = "context_menu",
 	[57409] = ".",
 	[57410] = "/",
 	[57411] = "*",

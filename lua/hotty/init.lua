@@ -40,7 +40,9 @@ M.EVENT_CHANGE = "change"
 M.EVENT_INPUT = "input"
 M.EVENT_CARET = "caret"
 M.EVENT_SUBMIT = "submit"
-M.EVENT_PRESS = "press"
+M.EVENT_PRESS = "press" -- the primary button's (SPEC §9)
+M.EVENT_CONTEXTMENU = "contextmenu" -- the platform's gesture for an element's context menu (SPEC §9)
+M.EVENT_AUXCLICK = "auxclick" -- another button released where it was pressed, from an element with aux (SPEC §9)
 M.EVENT_FOCUS = "focus"
 M.EVENT_BLUR = "blur"
 M.EVENT_FIT = "fit"
@@ -58,6 +60,8 @@ M.EVENTS = {
 	"caret",
 	"submit",
 	"press",
+	"contextmenu",
+	"auxclick",
 	"focus",
 	"blur",
 	"fit",
@@ -122,6 +126,14 @@ M.FEATURE_COUNT = "count" -- it says that a click repeats one before it (SPEC §
 M.FEATURE_MENU = "menu" -- it keeps a program's menu, shows its levels and lets the user pick from it (SPEC §10.7)
 M.FEATURE_BACKDROP = "backdrop" -- it draws a placement with b=1 under the cells, as a backdrop (SPEC §5.2)
 M.FEATURES = { "passthrough", "hover", "count", "menu", "backdrop" }
+
+-- The buttons, as the DOM numbers them (SPEC §9). A later button is 6 or
+-- more, and has no name.
+M.BUTTON_PRIMARY = 0
+M.BUTTON_MIDDLE = 1
+M.BUTTON_SECONDARY = 2
+M.BUTTON_BACK = 3
+M.BUTTON_FORWARD = 4
 
 -- The modifier keys held during a click, a press or a drag, as the bits of
 -- Event:mods (SPEC §9).
@@ -950,6 +962,7 @@ end
 -- checked, as one the SDK does not know is ignored (SDK.md §2.7).
 local AREA = { c = "int", r = "int", w = "int", h = "int" }
 local DRAG = { c = "int", r = "int", mods = "int", x = "int", y = "int", tx = "int", ty = "int" }
+local DRAG_START = { c = "int", r = "int", mods = "int", x = "int", y = "int", tx = "int", ty = "int", button = "int" }
 local ERROR = { code = "str", detail = "str" }
 local HIT = { t = "str", tx = "int", ty = "int" }
 local CAPS = {
@@ -968,13 +981,25 @@ local CAPS = {
 -- Each kind's detail (SPEC §9); a kind not here carries none the SDK reads.
 local DETAIL = {
 	click = { value = "str", href = "str", url = "str", area = AREA, mods = "int", count = "int" },
+	-- button, c and r only from an 0.8 session's secondary press (HOST.md §5.2).
 	press = { area = AREA, mods = "int", button = "int", c = "int", r = "int" },
+	contextmenu = { area = AREA, mods = "int", c = "int", r = "int" },
+	auxclick = {
+		button = "int",
+		value = "str",
+		href = "str",
+		url = "str",
+		area = AREA,
+		mods = "int",
+		c = "int",
+		r = "int",
+	},
 	change = { checked = "bool", value = "str", rev = "int" },
 	input = { value = "str", rev = "int", sel = { "int" } },
 	caret = { sel = { "int" }, rev = "int" },
 	submit = { fields = { { "str" } } },
 	fit = { r = "int" },
-	dragstart = DRAG,
+	dragstart = DRAG_START,
 	drag = DRAG,
 	dragend = DRAG,
 	hover = { c = "int", r = "int", out = "bool" },
@@ -1221,10 +1246,10 @@ function Message:event()
 	}, Event)
 end
 
---- The detail's value, a string: click, change, input.
+--- The detail's value, a string: click, auxclick, change, input.
 function Event:value()
 	local k = self.kind
-	if k ~= M.EVENT_CLICK and k ~= M.EVENT_CHANGE and k ~= M.EVENT_INPUT then
+	if k ~= M.EVENT_CLICK and k ~= M.EVENT_AUXCLICK and k ~= M.EVENT_CHANGE and k ~= M.EVENT_INPUT then
 		return nil
 	end
 	return self.detail.value
@@ -1275,59 +1300,40 @@ function Event:fields()
 	return out
 end
 
---- The modifier keys held, as the bits MOD_SHIFT, MOD_ALT, MOD_CTRL and
---- MOD_SUPER: in a click, a press and a drag's events (SPEC §9). 0 when none
---- is, and for any other kind.
+--- The modifier bits (MOD_SHIFT, MOD_ALT, MOD_CTRL and MOD_SUPER), or 0.
 function Event:mods()
-	local k = self.kind
-	if
-		k == M.EVENT_CLICK
-		or k == M.EVENT_PRESS
-		or k == M.EVENT_DRAG_START
-		or k == M.EVENT_DRAG
-		or k == M.EVENT_DRAG_END
-	then
-		return self.detail.mods or 0
-	end
-	return 0
+	local schema = DETAIL[self.kind]
+	return schema and schema.mods and self.detail.mods or 0
 end
 
---- A press's button, the DOM's number (SPEC §9): 2 for a secondary press, from an
---- element with secondary in its data-on. 0 when the detail has none, which is
---- the primary button's, and for any other kind. A handler meaning the primary
---- button checks that this is 0: a secondary press comes to it too.
+--- The DOM button number on auxclick, dragstart or a secondary press in
+--- an 0.8 session. A dragstart with no button uses BUTTON_PRIMARY.
 function Event:button()
-	if self.kind ~= M.EVENT_PRESS then
-		return 0
+	if self.kind == M.EVENT_DRAG_START then
+		return self.detail.button or M.BUTTON_PRIMARY
 	end
-	return self.detail.button or 0
+	local schema = DETAIL[self.kind]
+	return schema and schema.button and self.detail.button or nil
 end
 
---- A secondary press's cell, the pointer's column (SPEC §9); it may be
---- negative. nil when the detail has none, as a primary press's has not, and
---- for any other kind.
+local POINTER_CELL = { press = true, contextmenu = true, auxclick = true }
+
+--- The pointer's column on a contextmenu, auxclick or 0.8 secondary
+--- press. A menu opened with the keyboard has no pointer cell.
 function Event:c()
-	if self.kind ~= M.EVENT_PRESS then
-		return nil
-	end
-	return self.detail.c
+	return POINTER_CELL[self.kind] and self.detail.c or nil
 end
 
---- A secondary press's cell, the pointer's row (SPEC §9); see Event:c.
+--- The pointer's row, when present. See Event:c.
 function Event:r()
-	if self.kind ~= M.EVENT_PRESS then
-		return nil
-	end
-	return self.detail.r
+	return POINTER_CELL[self.kind] and self.detail.r or nil
 end
 
---- A link's click: its href, and its url, or nil when there is none.
+--- A link's href, and its url when present, on click or auxclick.
 function Event:link()
-	local href = self.detail.href
-	if self.kind ~= M.EVENT_CLICK or href == nil then
-		return nil
+	if (self.kind == M.EVENT_CLICK or self.kind == M.EVENT_AUXCLICK) and self.detail.href ~= nil then
+		return self.detail.href, self.detail.url
 	end
-	return href, self.detail.url
 end
 
 --- A fit's rows.
@@ -1381,13 +1387,11 @@ function Event:count()
 	return type(n) == "number" and n > 1 and n or 1
 end
 
---- A click's or a press's element, in cells from the surface's top left
+--- A click, press, contextmenu or auxclick target, in cells from the surface's top left
 --- cell: {c, r, w, h} (SPEC §9).
 function Event:area()
-	if self.kind ~= M.EVENT_CLICK and self.kind ~= M.EVENT_PRESS then
-		return nil
-	end
-	local a = self.detail.area
+	local schema = DETAIL[self.kind]
+	local a = schema and schema.area and self.detail.area
 	if not a or a.c == nil or a.r == nil or a.w == nil or a.h == nil then
 		return nil
 	end
